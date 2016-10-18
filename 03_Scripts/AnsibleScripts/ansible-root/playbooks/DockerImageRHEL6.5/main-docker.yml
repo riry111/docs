@@ -1,0 +1,28 @@
+- hosts: docker
+  vars_files:
+  - ../vars/main.yml
+  remote_user: root  
+  tasks:
+    - name: Create Docker Scripts  Directory
+      file: path={{ SCRIPT_DIR }} state=directory
+
+    - name: Copy Files for docker build
+      copy: src=./files/root/DockerScripts/rhel6-ssh/{{ item }} dest={{ SCRIPT_DIR }}/{{ item }}
+      with_items:
+        - Dockerfile
+        - init.sh
+        - authorized_keys
+
+    - name: Create Docker Image
+      docker_image:
+        path: "{{ SCRIPT_DIR }}"
+        name: "{{ IMAGE_NAME }}"
+
+    - name: Execute docker run
+      docker: 
+        name: "{{ CONTAINER_NAME }}"
+        image: "{{ IMAGE_NAME }}"
+        ports: "{{ SSH_PORT }}:22"
+        privileged: yes
+        volumes: /sys/fs/cgroup:/sys/fs/cgroup:ro
+

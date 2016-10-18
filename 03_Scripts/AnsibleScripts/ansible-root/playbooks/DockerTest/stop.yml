@@ -1,0 +1,10 @@
+- hosts: docker
+  vars_files:
+  - ../vars/main.yml
+  remote_user: root
+  tasks:
+    - name: STOP EAP Docker Container
+      docker:
+        name: "{{ CONTAINER_NAME }}"
+        image: "{{ IMAGE_NAME }}"
+        state: stopped

@@ -1,0 +1,20 @@
+- hosts: docker
+  vars_files:
+  - ../vars/main.yml
+  remote_user: root  
+  tasks:
+    - name: STOP EAP Docker Container
+      docker: 
+        name: "{{ CONTAINER_NAME }}"
+        image: "{{ IMAGE_NAME }}"
+        state: stopped
+
+    - name: Create EAP Docker Image
+      command: docker commit {{ CONTAINER_NAME }} {{ EAP_IMAGE_NAME }}
+
+    - name: Add tag to EAP Docker Image
+      command: docker tag -f {{ EAP_IMAGE_NAME }} {{ DOCKER_REGISTRY }}/{{ EAP_IMAGE_NAME }} 
+
+    - name: Push Image to Registry
+      command: docker push {{ DOCKER_REGISTRY }}/{{ EAP_IMAGE_NAME }}
+

@@ -1,0 +1,11 @@
+- hosts: ssh-container
+  remote_user: root  
+  tasks:
+    - name: Install JDK-1.8.0
+      yum: name={{ item }} state=installed
+      with_items:
+        - java-1.8.0-openjdk
+        - java-1.8.0-openjdk-devel
+
+    - name: Clear yum cache
+      command: yum clean all

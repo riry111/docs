@@ -1,0 +1,20 @@
+- hosts: docker
+  remote_user: root  
+  vars:
+    CONTAINER_NAME: eap6-an
+    IMAGE_NAME: docker-reg.example.com:5000/rhel6.5eap-an
+    SSH_PORT: 20022
+    WEB_PORT: 28080
+    MANAGE_PORT: 29990
+    NATIVE_PORT: 29999
+  tasks:
+    - name: Run EAP Docker Container
+      docker: 
+        name: "{{ CONTAINER_NAME }}"
+        image: "{{ IMAGE_NAME }}"
+        ports: 
+          - "{{ SSH_PORT }}:22"
+          - "{{ WEB_PORT }}:8080"
+          - "{{ MANAGE_PORT }}:9990"
+          - "{{ NATIVE_PORT }}:9999"
+

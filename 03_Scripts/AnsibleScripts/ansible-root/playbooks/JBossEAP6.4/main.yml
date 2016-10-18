@@ -1,0 +1,43 @@
+- hosts: ssh-container
+  vars_files:
+  - ../vars/main.yml
+  vars:
+    EAP_VERSION: 6.4.0
+    ARCHIVE_DIR: "{{ HOME_DIR }}/archive"
+    JBOSS_HOME: "{{ JBOSS_DIR }}/jboss-eap-6.4"
+    EAP_FILE: jboss-eap-{{ EAP_VERSION }}
+  remote_user: root  
+  tasks:
+    - name: Add OS User for JBoss
+      user: name={{ OS_USER }} 
+
+    - name: Create Archive Directory
+      file: path={{ ARCHIVE_DIR }} state=directory
+    
+    - name: Create JBoss Install Directory
+      file: path={{ JBOSS_DIR }} state=directory owner={{ OS_USER }} group={{ OS_USER }} 
+
+    - name: Copy EAP Archive File
+      copy: src=./files/{{ ARCHIVE_DIR }}/{{ EAP_FILE }}.zip dest={{ ARCHIVE_DIR }} owner={{ OS_USER }} group={{ OS_USER }} mode=0644
+
+    - name: Install JBoss EAP
+      unarchive: src={{ ARCHIVE_DIR }}/{{ EAP_FILE }}.zip dest={{ JBOSS_DIR }} owner={{ OS_USER }} group={{ OS_USER }}
+
+    - name: Create EAP Admin User
+      command: "{{ JBOSS_HOME }}/bin/add-user.sh -u {{ ADMIN_USER }} -p {{ ADMIN_PASSWD }} --silent"
+
+    - name: Remove JBoss EAP Archive File
+      file: path={{ ARCHIVE_DIR }}/{{ EAP_FILE }}.zip state=absent
+
+    - name: Check JBoss EAP Start Command
+      shell: grep {{ JBOSS_HOME }}/bin/standalone.sh /usr/local/bin/init.sh
+      register: result
+      failed_when: result.rc not in [0, 1]
+
+    - name: Add JBoss EAP Start Command
+      lineinfile: 
+        dest=/usr/local/bin/init.sh
+        regexp='^/sbin/service sshd start$'
+        line='/sbin/service sshd start\n/sbin/runuser -l jboss -c "{{ JBOSS_HOME }}/bin/standalone.sh -c standalone.xml -b {{ JBOSS_BIND_ADDRESS }} -bmanagement {{ JBOSS_BIND_ADDRESS }}"' 
+      when: result.rc == 1
+

@@ -1,0 +1,18 @@
+#===============================#
+# You can change these parameters
+#===============================#
+export OS_USER="jboss"			#JBoss起動 OSユーザ
+export OS_PASSWD="redhat1!"		#JBoss起動 OSユーザ パスワード
+export HOME_DIR="/home/jboss"		#JBoss起動 OSユーザ ホームディレクトリ
+export JBOSS_DIR="/opt/jboss/eap"	#JBoss EAP 導入ディレクトリ
+export ADMIN_USER="admin"		#EAP管理者ユーザ
+export ADMIN_PASSWD="redhat1!"		#EAP管理者パスワード	
+export IMAGE_NAME="rhel6.5-ssh"		#sshd 起動用 Docker image名
+export CONTAINER_NAME="rhel6.5sd"	#JBoss EAPインストール用Dockerコンテナ名
+export EAP_IMAGE_NAME="rhel6.5eap"	#JBoss EAPインストール済みDocker image名
+export DOCKER_REGISTRY="docker-reg.example.com:5000"	#Private Registryのホスト名:ポート番号
+export SSH_PORT="10022"			#DockerコンテナSSH(22)ポート portfoward先
+export WEB_PORT="8080"			#DockerコンテナWEB(8080)ポート portfoward先
+export MANAGE_PORT="9990"		#DockerコンテナMANAGE(9990)ポートportfoward先
+export NATIVE_PORT="9999"		#DockerコンテナNATIVE(9999)ポートportfoward先
+export JBOSS_BIND_ADDRESS="0.0.0.0"	#JBOSS EAP BINDアドレス

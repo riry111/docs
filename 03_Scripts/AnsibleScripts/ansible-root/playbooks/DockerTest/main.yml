@@ -1,0 +1,15 @@
+- hosts: docker
+  remote_user: root  
+  vars_files:
+    - docker-vars.yml
+  tasks:
+    - name: Run EAP Docker Container
+      docker: 
+        name: "{{ CONTAINER_NAME }}"
+        image: "{{ IMAGE_NAME }}"
+        ports: 
+          - "{{ SSH_PORT }}:22"
+          - "{{ WEB_PORT }}:8080"
+          - "{{ MANAGE_PORT }}:9990"
+          - "{{ NATIVE_PORT }}:9999"
+

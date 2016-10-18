@@ -1,0 +1,202 @@
+:scrollbar:
+:data-uri:
+:toc2:
+
+= OpenShift 3.3 Jenkins Pileline Sample 
+
+:numbered:
+
+
+== OpenShift 3.3 環境入手
+
+=== OpenShift 3.3 Demo/Fastrax Lab 環境作成
+. デモ環境手配
+  https://labs.opentlc.com にアクセスし、Service > Catalogs > OpenShift 3.3 FastAdv を orderする +
+  プロビジョニングには40分程度かかります。
+
+. Ansible 実行環境のサーバにSSH接続
+  * 接続ユーザー名、接続先の4桁の識別子(コマンド例では、**${GUID}**) は環境に応じて変更が必要
++
+----
+$ ssh -l mamurai-redhat.com oselab-${GUID}.oslab.opentlc.com
+$ sudo su -
+----
+
+. 設定用のツールをダウンロード (oselab サーバで実行)
++
+----
+# git clone https://github.com/mamurai/Provisioning_OpenShift3.3_FastAdv.git
+----
+
+=== OpenShift 認証設定の変更 (oselab サーバで実行)
+初期インストール直後は、OpenShiftの認証が deny_all になっているので、Ansible Playbook **01_IdentityProvider.yaml** を実行し次の2つの設定を実施します。
+
+  * 初期状態では WebConsole へのログインが無効になっているので、HTPASSWD に変更後、Openshift Masterを再起動
+  * OpenShift ユーザーを作成
++  
+----
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/01_IdentityProvider.yaml
+----
++
+.初期ユーザ 一覧
+[cols="1,1,2",options="header"]
+|====
+| User | Passwd | 補足
+| oscadm | r3dh4t1! | 管理者ユーザー cluster-admin 権限
+| andrew | redhat1! | 一般ユーザー
+| karla | redhat1! | 一般ユーザー
+|====
+
+=== Metrics の有効化
+本環境はデフォルトでは、CPU/Memory/Network のリソースを取得する Metricsが無効になっているので、Ansible-Playbook **02_Metrics_deploy.yaml** を実行しMetricsを有効にします。
+
+  * master-config.yaml に metricsPublicURL を追記し、openshift-master を再起動
+  * metrics-deployer を実行し、metrics関連のコンテナを起動
++
+----
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/02_Metrics_deploy.yaml
+----
+     ** Metrics 関連の Podが起動されるまで待つ必要があります。完了すると以下の例のようになります。
++
+----
+# oc project openshift-infra
+# oc get pod
+NAME                         READY     STATUS      RESTARTS   AGE
+hawkular-cassandra-1-faw83   1/1       Running     0          1h
+hawkular-metrics-z7n4d       1/1       Running     0          1h
+heapster-fl1kb               1/1       Running     1          1h
+metrics-deployer-pwwzd       0/1       Completed   0          1h
+----
+  * Metrics 有効化のため、Metrics Pod 起動後、初回のみ Hawkular Metrics の URLにアクセスします
++
+----
+[URL] https://metrics.cloudapps-${GUID}.oslab.opentlc.com/hawkular/metrics
+----
+  
+=== Jenkins コンテナとサンプルアプリのデプロイ
+Jenkinsコンテナ起動、及び、ビルドパイプラインで操作するサンプルアプリのデプロイを実施ため、Ansible-Playbook **03_Jenkins_deploy.yaml** を実行します。 + 
+
+[NOTE]
+Teck-Preview の OpenShift-Build-Pipeline を利用する場合は、本項目は実行せず、次項の **Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)** を実施してください。 
+
+  * サンプルアプリ (mlbparks を mamurai に Forkしたもの) のビルド
+  * Jenkins コンテナの起動
++
+----
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/03_Jenkins_deploy.yaml
+----
+     ** JenkinsコンテナのPodが起動されるまで待つ必要があります。完了すると以下の例のようになります。
++
+----
+# oc project sharedjenkins 
+# oc get pod 
+NAME              READY     STATUS    RESTARTS   AGE
+jenkins-1-5phh8   1/1       Running   1          21h
+----
+
+
+
+* Web Console、Jenkins のログイン確認、及び、サンプルアプリの表示確認を実施します
+  ** 下記に示すURLの **${GUID}** の部分はお使いの環境に合わせて変更してください
++
+.URL一覧
+[cols="1,3,1",options="header"]
+|====
+| 対象ページ | URL | ID/Pass
+| Web Console | https://master1-${GUID}.oslab.opentlc.com:8443/ | oscadm / r3dh4t1!
+| Jenkins     | https://jenkins-sharedjenkins.cloudapps-${GUID}.oslab.opentlc.com | admin / r3dh4t1!
+| Sample App  | http://mlbparks-mlbparks.cloudapps-${GUID}.oslab.opentlc.com/ | -
+|====
+
+=== Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)
+OpenShift の ビルドパイプラインを利用するためには、Jenkins と 管理対象アプリケーションを同じプロジェクトに作成する必要があります。+
+今回のサンプルでは、**jenkins-pipeline** プロジェクトに双方のオブジェクトを
+
+
+  * Jenkins コンテナの起動
+  * Jenkins パイプライン用のテンプレート作成
+  * サンプルアプリ (mlbparks を mamurai に Forkしたもの) のビルド
+  * Jenkins ビルドパイプライン の ビルド
++
+----
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/extra/03_Jenkins_pipeline-deploy.yaml
+----
+     ** JenkinsコンテナのPodが起動されるまで待つ必要があります。完了すると以下の例のようになります。
++
+----
+# oc project jenkins-pipeline 
+# oc get pod
+NAME                       READY     STATUS      RESTARTS   AGE
+jenkins-1-vnsds            1/1       Running     1          36m
+mlbparks-1-build           0/1       Completed   0          30m
+mlbparks-2-thook           1/1       Running     0          23m
+mlbparks-mongodb-1-h4sxr   1/1       Running     0          31m
+----
++
+なお、全ての処理が完了したのちに、WebConsoleにアクセス、+
+jenkins-pipeline プロジェクトを選択 > Pipeline mlbparks-pipeline をクリックすると、パイプライン実行結果が確認できます。
+
+.WebConsole パイプライン実行結果
+image::images/OpenShift3.3_Jenkins_Sample_001.png[]
+
+== Jenkins ビルドパイプライン関連の設定
+=== Jenkins セキュリティ設定変更
+
+GitHub の Webhook と Jenkins Pipeline 連携のためセキュリティレベルを変更する
+
+. jenkins にログイン
+
+. セキュリティレベルを変更する
+  * Manage Jenkins > Configure Global Security をクリック
+  * Configure Global Security ページにて 以下の設定を実施
+    ** Allow users to sign up にチェックを入れる
+    ** Authorization を Logged-in users can do anything に変更
+
+=== Jenkins Pipeline の作成 (mlbparks の ビルド＋デプロイ)
+
+. Jenkins にログインし、ビルドパイプラインを作成
+  * New Item  > Item Name に名称 を設定 > Pipeline を選択 > OK をクリック
+  * [Trigger builds remotely] にチェックを入れ 任意の Authentication Token を設定する
+     [jenkins_mlbparks_build_token] を仮に設定
+  * Pipeline > Definition を Pipeline script を選択し 次のスクリプトを設定する
+    ** ここではビルド->デプロイのみの簡単なパイプラインのみ設定しています。必要に応じてスクリプトの中を書き換え絵ください。
++
+----
+node {
+	stage 'Build-App'
+	openshiftBuild apiURL: '', authToken: '', bldCfg: 'mlbparks', buildName: '', checkForTriggeredDeployments: 'false', commitID: '', namespace: 'mlbparks', showBuildLogs: 'false', verbose: 'false', waitTime: '1800000'
+
+	stage 'Deploy-App'
+	openshiftDeploy apiURL: '', authToken: '', depCfg: 'mlbparks', namespace: 'mlbparks', verbose: 'false', waitTime: '1800000'
+}
+----
+
+. Buld Now をクリックし Pipeline Build を実行
+* 画面表示のサンプル
+
+.Jenkins Pipeline サンプル
+image::images/OpenShift3.3_Jenkins_Sample_002.png[]
+
+=== GitHub より Webhookの設定を実施する
+
+. サンプルアプリ格納場所に移動
+  * 上記で実行したplaybook [02_Jenkins_deploy.yaml] の変数 [app_template] にテンプレートの雛形があります。この中の [GIT_URI] がソースリポジトリとなります。
++
+----
+https://github.com/mamurai/openshift3mlbparks
+----
+
+. WebHook の設定
+  * Settings > Webhooks > Add Webhook より Webhook設定画面を開く
+  * Payload URL に Jenkins Pipeline Job と Tokenを含むURLを追記
+    ** Payload URLの例
++
+----
+https://jenkins-sharedjenkins.cloudapps-${GUID}.oslab.opentlc.com/job/mlbparks_build/build?token=jenkins_mlbparks_build_token
+----
+  * Disable SSL verification をクリックする
+  * Add Webhook をクリックすると、Jenkins Pipline 側で ビルドが実行されます
+  * 以降は、対象のソースに Commit が走れば OpenShift側のビルドバイプラインが自動実行されます。
+
+
+以　上

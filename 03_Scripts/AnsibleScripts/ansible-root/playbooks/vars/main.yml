@@ -1,0 +1,18 @@
+OS_USER: jboss
+OS_PASSWD: redhat1!
+HOME_DIR: /home/jboss
+JBOSS_DIR: /opt/jboss/eap
+ADMIN_USER: admin
+ADMIN_PASSWD: redhat1!
+IMAGE_NAME: rhel6.5-ssh-an
+CONTAINER_NAME: rhel6.5sd-an
+EAP_IMAGE_NAME: rhel6.5eap-an
+DOCKER_REGISTRY: docker-reg.example.com:5000
+SSH_PORT: 20022
+WEB_PORT: 28080
+MANAGE_PORT: 29990
+NATIVE_PORT: 29999
+JBOSS_BIND_ADDRESS: 0.0.0.0
+TMPFS: /tmp/shm-an
+SCRIPT_DIR: /root/DockerScripts/rhel6-ssh-an
+

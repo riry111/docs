@@ -1,0 +1,235 @@
+= JDV-HP Vertica 環境構築メモ
+
+本資料では、HP のカラム型データベース Vertica と JBoss Data Virtualization の接続テストを実施するため次の4点を示します。
+
+* HP Vertica のコニュニティー版を入手し、環境構築
+* HP Vertica にサンプルデータをインポート
+* JBoss Developper Studio に ソースモデルとしてインポート
+* Vertica から インポートした JDV (Teiid) の物理モデルと他のデータを結合するサンプル
+
+.設定値メモ
+[width="100%",cols="1,3",options="header"]
+|====
+^.^| 項目 ^.^| 設定値
+| Vertica サーバ IPアドレス | 192.168.99.88
+| Vertica サーバアカウント | root/password, dbadmin/password
+| Vertica Management Console | https://vertica.osaka.redhat.com:5450 (ID/passwd : dbadmin/password)
+| Vertica JDBC接続文字列 | jdbc:vertica://192.168.99.88:5433/VMartDB
+|====
+
+
+:numbered:
+
+== Vertica 環境構築
+
+=== HP Vertica
+. HP Vertica 日本語ドキュメントのダウンロード
+  * http://h50146.www5.hpe.com/products/software/hpsoftware/vertica/trials.html#download
+. HP myVertica アカウント作成
+  * https://my.vertica.com
+. my.ertica にログインし、Vertica をダウンロード
+  * https://my.vertica.com/download/vertica/community-edition/
+  * OVA形式のイメージ, Management Console, Client Packages 以下の JDVCドライバー をダインロードします。
+
+=== KVM 側 インポート
+
+ova イメージを kvmにインポートする方法は以下のKCSを参照してください +
+
+* https://access.redhat.com/ja/articles/1454433[VMware からゲストを OVA ファイルとしてエクスポートして、KVM にインポートする]
+
+==== vertica KVM 格納用のストレージプール作成 (ディレクトリを分けるため)
+* ディレクトリ作成
++
+----
+# mkdir /var/lib/libvirt/images/HPE
+----
+* Strage Pool 作成用の xml ファイルを作成
++
+----
+# vi /etc/libvirt/storage/HPE.xml
+----
++
+----
+<pool type='dir'>
+  <name>HPE</name>
+  <capacity unit='bytes'>0</capacity>
+  <allocation unit='bytes'>0</allocation>
+  <available unit='bytes'>0</available>
+  <source>
+  </source>
+  <target>
+    <path>/var/lib/libvirt/images/HPE</path>
+  </target>
+</pool>
+----
+* poolの定義と起動、確認
++
+----
+# virsh pool-define /etc/libvirt/storage/HPE.xml
+# virsh pool-start HPE
+# virsh pool-autostart HPE
+# virsh pool-list
+ 名前               状態     自動起動
+-------------------------------------------
+ default              動作中  はい (yes)
+ HPE                  動作中  はい (yes)
+ iso                  動作中  はい (yes)
+----
+
+==== virt-v2v コマンドで kvmにインポート
+* virt-v2v コマンド実行
++
+----
+# export LIBGUESTFS_BACKEND=direct
+# virt-v2v -i ova HPE\ Vertica\ Analytic\ Platform.ova -o libvirt -of qcow2 -os HPE -on vertica 
+----
+** https://access.redhat.com/documentation/ja-JP/Red_Hat_Enterprise_Linux/6/html/V2V_Guide/chap-V2V_Guide-References.html#References_Virtualization__virt-v2v_Parameters[【参考】virt-v2vのパラメータ]
+
+==== vartica kvm の設定変更
+* ネットワーク設定変更 (KVMホストの状態に合わせる)
++
+----
+# virsh edit vertica
+
+    ====== 変更前 =====
+    <interface type='network'>
+      <mac address='52:54:00:ad:6d:e3'/>
+      <source network='Network adapter 1'/>
+    ====== 変更前 =====
+	
+    ====== 変更後 =====
+    <interface type='bridge'>
+      <mac address='52:54:00:ad:6d:e3'/>
+      <source bridge='br0'/>
+    ====== 変更後 =====
+----
+* KVMを起動
++
+----
+# versh start vertica
+----
+* root にて vertica にログインし各種設定変更を実施する。初期ユーザ/パスワードは次の通り
++
+[width="50%",cols="1,1,2"]
+|====
+^.^| User ^.^| Passwd ^.^| 補足
+| root | password | サーバ管理ユーザー
+| dbadmin | password | DB管理ユーザー
+|====
+* デフォルトランレベルを変更(コンソール接続設定のため)
++
+----
+# unlink /etc/systemd/system/default.target
+# ln -s /lib/systemd/system/multi-user.target /etc/systemd/system/default.target
+# ls -la /etc/systemd/system/default.target
+----	
+* virsh console を利用できるよう、コンソール接続の設定を実施
+** /etc/default/grub ファイルに次の記述を追加
++
+----
+GRUB_CMDLINE_LINUX_DEFAULT="console=tty0 console=ttyS0,115200n8"
+GRUB_TERMINAL=serial
+GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
+----
+** GRUBの変更を有効にするため次のコマンドを実行
++
+----
+# grub2-mkconfig -o /boot/grub2/grub.cfg
+----
+** 仮想マシン reboot 後、コンソール接続を実施
++
+----
+# virsh console vertica
+----
+
+* ホスト名変更
++
+----
+# nmcli general hostname vertica
+----
+* IPアドレス設定
++
+----
+# cd /etc/sysconfig/network-scripts
+# rm ifcfg-ens192 ifcfg-eth0
+# vi ifcfg-eth0
+----
++
+----
+TYPE="Ethernet"
+BOOTPROTO="static"
+IPADDR=192.168.99.88
+NETMASK=255.255.255.0
+NETWORK=192.168.99.0
+GATEWAY=192.168.99.1
+BROADCAST=192.168.99.255
+DNS1=192.168.99.51
+DNS2=8.8.8.8
+DEFROUTE="yes"
+PEERDNS="yes"
+PEERROUTES="yes"
+IPV4_FAILURE_FATAL="no"
+IPV6INIT="no"
+NAME="eth0"
+DEVICE="eth0"
+ONBOOT="yes"
+----
+
+* ネットワークの再起動
++
+----
+# systemctl restart network
+----
+
+== Vertica サンプルDB作成
+
+https://drive.google.com/open?id=0B_SH4uhdyQisVEtSZnBOZWVXSFE[HPE Vertica Community Edition 日本語ガイド] の次の項目を参照してください。　
+
+* P29 データベースの作成
+* P68 マネージメントコンソールのインストール
+
+== JDBDS への Vertica 連携
+=== JBDSの画面よりJDBC経由でデータモデルをインポート
+
+[width="75%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/JDV-Vertica_connect_001.png[] | New > Teiid Model Project を選択し 新規で Teiid プロジェクトを作成します。
+| image:images/JDV-Vertica_connect_002.png[] | プロジェクト名に vertica_sample を入力し、Finish をクリックします。
+| image:images/JDV-Vertica_connect_003.png[] | Virtica のデータを ソースモデルとしてインポートするための設定を示します。 +
+Vertica_sample プロジェクトを選択し右クリック > Import を選択します。
+| image:images/JDV-Vertica_connect_004.png[] | JDVC Datasource >> Source Model を選択します。
+| image:images/JDV-Vertica_connect_005.png[] | **New** をクリックします
+| image:images/JDV-Vertica_connect_006.png[] | Connection Profile に vertica が存在しないため、ここでは、**Generic JDBC** を選択、Nameに **vertica** を入力後、Next をクリックします。
+| image:images/JDV-Vertica_connect_007.png[] | 上段の右から2つ目のアイコン +
+ **New Driver Definition** のボタンをクリックします。
+| image:images/JDV-Vertica_connect_008.png[] | **Generic JDBC Driver** を選択し、Driver name に **vertica** を入力後、JAR List タブを開きます。
+| image:images/JDV-Vertica_connect_009.png[] | **Add JAR/Zip** ボタンをクリックし、vertica の JDBCドライバーを選択します。
+| image:images/JDV-Vertica_connect_010.png[] | Preperties タブを開き、Driver Class の Value をクリック、Browse for class を選択、表示されたクラス一覧の中から、 +
+**com.vertica.jdbc.Driver** を選択します。
+| image:images/JDV-Vertica_connect_011.png[] | Vertica 接続時の ホスト名、ポート番号、データベース名、ユーザー、パスワードを設定し、Save Password にチェックを入れます。 + 
+Test Connection ボタンをクリックし接続が成功することを確認したのちに Finish ボタンをクリックします。
+| image:images/JDV-Vertica_connect_012.png[] | Next をクリックします。
+| image:images/JDV-Vertica_connect_013.png[] | TABLE のみ選択し、Next ボタンをクリックします。
+| image:images/JDV-Vertica_connect_014.png[] | インポートするテーブルのみ選択し、Next をクリックします。
+| image:images/JDV-Vertica_connect_015.png[] | Model Name に **online_sales.xml** を指定し Finish をクリックします。
+| image:images/JDV-Vertica_connect_016.png[] | 選択したテーブルがソースモデルとして表示されます。
+|====
+
+=== Transrator 変更
+デフォルトでは、トランスレータが jdbc-simple になっているため、vertica 用のトランスレータに変更します。なお、本設定はJDV6.3 サーバ と JBDSを接続後に実施すればトランスレータを選択できます。
+[width="75%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/JDV-Vertica_connect_017.png[] | 上記で作成した物理モデル **online_sales** を選択し右クリック > Modeling > Set Translator Name を選択する 
+| image:images/JDV-Vertica_connect_018.png[] | JDV6.3 に接続している場合は、利用可能なトランスレータが選択できるので、**vertica** を選択します。 +
+JDV 未接続の場合は選択はできないが、手入力は可能です。
+|====
+
+
+== Vertica のデータとCSVファイルの結合
+
+[SQL Bkup]
+select cc_name, cc_state, cc_region from call_center_dimension
+select a.cc_name, a.cc_state, a.cc_region, b.jstate, b.jcabital from cc_view a, states b where a.cc_state=b.sn
+ 

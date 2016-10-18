@@ -1,0 +1,16 @@
+module add --name=org.postgresql.Driver --resources=/home/jboss/App/jdbc/postgresql-9.3-1102.jdbc4.jar --dependencies=javax.api,javax.transaction.api
+/subsystem=datasources/jdbc-driver=postgresql:add(driver-name=postgresql, driver-module-name=org.postgresql.Driver)
+
+
+data-source add --name=jpcustomers --connection-url=jdbc:postgresql://DB_PORT_5432_TCP_ADDR:DB_PORT_5432_TCP_PORT/jpcustomers --jndi-name=java:/jpcustomers --driver-name=postgresql --user-name=jpcustomers --password=jpcustomers data-source
+
+data-source add --name=apaccustomers --connection-url=jdbc:postgresql://DB_PORT_5432_TCP_ADDR:DB_PORT_5432_TCP_PORT/apaccustomers --jndi-name=java:/apaccustomers --driver-name=postgresql --user-name=apaccustomers --password=apaccustomers 
+
+
+data-source add --name=PostgresDS --connection-url=jdbc:postgresql://DB_PORT_5432_TCP_ADDR:DB_PORT_5432_TCP_PORT/postgres --jndi-name=java:jboss/datasources/PostgresDS --driver-name=postgresql --user-name=postgres --password=postgres
+
+data-source enable --name=jpcustomers
+data-source enable --name=apaccustomers
+data-source enable --name=PostgresDS
+
+/:shutdown

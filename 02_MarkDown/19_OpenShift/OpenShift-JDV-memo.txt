@@ -1,0 +1,129 @@
+=================================
+OpenShift Online での JDV HandsOn
+=================================
+
+[前提]
+  OpenShift Online のアカウント取得 (NameSpade mamurai)
+  OpenShift Client Tool のインストール
+  
+1. アプリケーションの作成
+
+	1) jdv6.1.0カートリッジを利用する app dv61 を作成
+	$ rhc app create dv61 jboss-dv-6.1.0
+	
+	2)PostgreSQL カートリッジの追加
+	$ rhc cartridge add postgresql-9.2  --namespace mamurai --app dv61
+
+
+
+port-forward 開始
+	$ rhc port-forward dv61
+
+
+Using postgresql-9.2 (PostgreSQL 9.2) for 'postgres'
+postgresql-9.2 (PostgreSQL 9.2)
+-------------------------------
+  Gears:          Located with jboss-dv-6.1.0
+  Connection URL: postgresql://$OPENSHIFT_POSTGRESQL_DB_HOST:$OPENSHIFT_POSTGRESQL_DB_PORT
+  Database Name:  dv61
+  Password:       tF6ycJwPaU4d
+  Username:       adminpp9elvl
+mamurai-mac:.openshift mamurai$ 
+mamurai-mac:.openshift mamurai$ 
+mamurai-mac:.openshift mamurai$ rhc cartridge show jdv --namespace mamurai --app dv61
+Short Name     Full name
+==========     =========
+jboss-dv-6.1.0 JBoss Data Virtualization 6
+postgresql-9.2 PostgreSQL 9.2
+
+There are no cartridges that match 'jdv'.
+mamurai-mac:.openshift mamurai$ rhc cartridge show jboss-dv --namespace mamurai --app dv61
+Using jboss-dv-6.1.0 (JBoss Data Virtualization 6) for 'jboss-dv'
+jboss-dv-6.1.0 (JBoss Data Virtualization 6)
+--------------------------------------------
+  From:                     https://raw.githubusercontent.com/jboss-datavirtualization/openshift-cartridge-datavirtualization/current/metadata/manifest.yml
+  Website:                  http://www.jboss.org
+  Gears:                    Located with postgresql-9.2
+  Dashboard Admin Password: JEcrc8MDXl59
+  Dashboard Admin Username: dbadmin
+  Modeshape Admin Password: uJ2VMNVZuiKV
+  Modeshape Admin Username: msadmin
+  Modeshape User Password:  ETzdxzI-nSHa
+  Modeshape User Username:  msuser
+  Teiid Password:           ivYnDLXbiF9-
+  Teiid Username:           user
+
+
+
+
+psql -h localhost -U
+
+
+ToDo
+### DataSourceの作成
+1. DataSourceの作成
+1) 管理CLIへの接続
+	$ <$JBOSS_HOME>/bin/jboss-cli.sh -c --controller localhost:9999
+2) JDBCドライバーの登録
+	[standalone@localhost:9999 /] deploy <$コンテンツ格納PATH>/JDV6Handson/postgresql-9.2-1004.jdbc4.jar 
+3) データソースの作成
+	[standalone@localhost:9999 /] data-source add --name=jpcustomers --connection-url=jdbc:postgresql://127.5.182.2:5432/jpcustomers --jndi-name=java:/jboss/datasources/jpcustomers --driver-name=postgresql-9.2-1004.jdbc4.jar --user-name=jpcustomers --password=jpcustomers
+	[standalone@localhost:9999 /] data-source enable --name=jpcustomers
+	[standalone@localhost:9999 /] data-source add --name=apaccustomers --connection-url=jdbc:postgresql://127.5.182.2:5432/apaccustomers --jndi-name=java:/jboss/datasources/apaccustomers --driver-name=postgresql --user-name=apaccustomers --password=apaccustomers
+	[standalone@localhost:9999 /] data-source enable --name=apaccustomers
+
+
+	[standalone@localhost:9999 /] data-source add --name=jpcustomers --connection-url=jdbc:postgresql://127.5.182.2:5432/jpcustomers --jndi-name=java:/jboss/datasources/jpcustomers --driver-name=postgresql --user-name=jpcustomers --password=jpcustomers
+	[standalone@localhost:9999 /] data-source enable --name=jpcustomers
+	[standalone@localhost:9999 /] data-source add --name=apaccustomers --connection-url=jdbc:postgresql://127.5.182.2:5432/apaccustomers --jndi-name=java:/jboss/datasources/apaccustomers --driver-name=postgresql --user-name=apaccustomers --password=apaccustomers
+	[standalone@localhost:9999 /] data-source enable --name=apaccustomers
+
+postgresql
+
+### ファイルリソースアダプターの登録
+1. SSHで接続しCSVファイル格納用ディレクトリを作成
+$ rhc ssh dv61
+[dv61-mamurai.rhcloud.com 55516d95e0b8cd4a31000117]\> cd dv
+[dv61-mamurai.rhcloud.com dv]\> mkdir csv
+[dv61-mamurai.rhcloud.com dv]\> exit
+
+2. CSVファイルをSCP
+$ scp <>/JDV6Handson/accounts.csv 55516d95e0b8cd4a31000117@dv61-mamurai.rhcloud.com:./dv/csv
+
+3. ファイル リソースアダプターの作成
+
+$JBOSS_HOME/bin/jboss-cli.sh -c
+[standalone@localhost] cd /subsystem=resource-adapters/resource-adapter=file
+[standalone@localhost]  ./connection-definitions=<接続名>:add(jndi-name=<JNDI名>, class-name=org.teiid.resource.adapter.file.FileManagedConnectionFactory, enabled=true, use-java-context=true)
+[standalone@localhost]  cd connection-definitions=＜接続名＞
+[standalone@localhost]  ./config-properties=ParentDirectory:add(value=”<ディレクトリ名>")
+
+
+[standalone@localhost:9999 /]  cd /subsystem=resource-adapters/resource-adapter=file
+[standalone@localhost:9999 /]   ./connection-definitions=PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view:add(jndi-name=java:/PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view, class-name=org.teiid.resource.adapter.file.FileManagedConnectionFactory, enabled=true, use-java-context=true)
+[standalone@localhost:9999 /]   cd connection-definitions=PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view
+[standalone@localhost:9999 /]   ./config-properties=ParentDirectory:add(value="/var/lib/openshift/55516d95e0b8cd4a31000117/dv/csv")
+[standalone@localhost:9999 /]  /:shutdown(restart=true)
+
+
+[standalone@localhost:9999 /]  cd /subsystem=resource-adapters/resource-adapter=file
+[standalone@localhost:9999 /]   ./connection-definitions=PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view:add(jndi-name=java:/PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view, class-name=org.teiid.resource.adapter.file.FileManagedConnectionFactory, enabled=true, use-java-context=true)
+[standalone@localhost:9999 /]   cd connection-definitions=PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_accounts_view
+[standalone@localhost:9999 /]   ./config-properties=ParentDirectory:add(value="/var/lib/openshift/55516d95e0b8cd4a31000117/dv/csv")
+[standalone@localhost:9999 /]  /:shutdown(restart=true)
+
+
+./config-properties=ParentDirectory:add(value="/var/lib/openshift/55516d95e0b8cd4a31000117/dv/csv")
+
+rhc cartridge [start|stop|show] jboss-dv
+rhc cartridge stop jboss-dv
+$JBOSS_HOME/bin/jboss-cli.sh -c
+
+
+
+PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_apaccustomers.vdb
+
+
+PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_apaccustomers
+java:/PREVIEW_dc5e7c70-d7bf-4270-b833-09530157850f_HandsOn_pj_oso_apaccustomers
+jdbc:postgresql://127.5.182.2:5432/apaccustomers

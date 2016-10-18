@@ -1,0 +1,30 @@
+- hosts: docker
+  vars_files:
+  - ../vars/main.yml
+  remote_user: root  
+  tasks:
+    - name: Create Docker Scripts  Directory
+      file: path={{ SCRIPT_DIR }} state=directory
+
+    - name: Copy Files for docker build
+      copy: src=./files/root/DockerScripts/rhel6-ssh/{{ item }} dest={{ SCRIPT_DIR }}/{{ item }}
+      with_items:
+        - Dockerfile
+        - init.sh
+        - authorized_keys
+
+    - name: Create Docker Image
+      command: docker build -t {{ IMAGE_NAME }} . chdir={{ SCRIPT_DIR }}
+
+    - name: mount tempfs dir
+      mount: name={{ TMPFS }} fstype=tmpfs src=swap state=mounted opts=size=1024
+
+    - name: check docker run process
+      shell: docker ps -a | grep {{ CONTAINER_NAME }}
+      register: result
+      failed_when: result.rc not in [0, 1]
+
+    - name: Execute docker run
+      command: docker run --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro -v {{ TMPFS }}/:/dev/shm/ -p {{ SSH_PORT }}:22 -p {{ NATIVE_PORT }}:9999 -p  {{ MANAGE_PORT }}:9990 -p {{ WEB_PORT }}:8080 --name {{ CONTAINER_NAME }} -t -d {{ IMAGE_NAME }}
+      when: result.rc == 1
+

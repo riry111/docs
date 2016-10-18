@@ -1,0 +1,167 @@
+http://qiita.com/ksrt/items/34f6a31c7af34da9e471[参考ページ]
+
+.rhel-osp01 bridge設定
+----
+# nmcli con add type bridge ifname br0
+# nmcli con modify bridge-br0 bridge.stp no
+# nmcli con modify bridge-br0 ipv4.method manual ipv4.address "192.168.99.86/24" ipv4.gateway "192.168.99.1"  ipv4.dns 192.168.99.80,192.168.99.51
+----
+
+./etc/sysconfig/network-scripts/ifcfg-ens3
+----
+DEVICE=ens3
+TYPE=OVSPort
+DEVICEYPE=ovs
+OVS_BRIDGE=br-ex
+ONBOOT=yes
+NM_CONTROLLED=no
+BOOTPROTO=none
+----
+
+./etc/sysconfig/network-scripts/ifcfg-br-ex
+----
+DEVICE=br-ex
+TYPE=OVSBridge
+DEVICETYPE=ovs
+ONBOOT=yes
+NM_CONTROLLED=no
+BOOTPROTO=none
+IPV4_FAILURE_FATAL=no
+ONBOOT=yes
+IPADDR=192.168.99.86
+PREFIX=24
+GATEWAY=192.168.99.1
+DNS1=192.168.99.80
+DNS2=192.168.99.51
+----
+
+
+物理ネットワークを設定して、適切にブリッジを物理ネットワークにマッピング
+
+./etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini
+----
+bridge_mappings = physnet1:br-ex
+----
+
+/etc/neutron/plugins/ml2/openvswitch_agent.ini (RHOSP8)
+
+neutron-openvswitch-agent サービスを再起動して、変更を適用
+----
+# systemctl restart neutron-openvswitch-agent
+----
+
+
+
+これ以降で再起動するとコンソールに次のメッセージが表示され停止できなくなる。virsh destroy で強制的にKVMを停止した。
+
+.コンソール表示ログ
+----
+rm: cannot remove '/lib/dracut/hooks/shutdown/30-dm-shutdown.sh': Read-only file system
+...
+----
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1178497#c26[workaround]
+
+
+
+. Network public_subnet の再作成
+
+.. デフォルトのpublic network の router1 紐付け と subnet を削除
+
+  # source keystonerc_admin
+  # neutron router-gateway-clear router1
+  # neutron subnet-delete public_subnet
+
+.. [参考] ネットワークの削除・作成例
+
+  # neutron net-delete public
+  # neutron net-create public --shared  --router:external True --provider:network_type vxlan
+
+.. IPアドレスの範囲を狭めてサブネット再作成
+
+  # neutron subnet-create --name public_subnet --enable_dhcp=false --allocation-pool=start=192.168.99.90,end=192.168.99.99 --gateway=192.168.99.1 public 192.168.99.0/24 --dns-nameservers list=true 192.168.99.51
+  # neutron router-gateway-set router1 public
+
+. セキュリティグループの作成
+
+  # neutron security-group-create demo
+  # neutron security-group-rule-create --protocol icmp --direction ingress demo
+  # neutron security-group-rule-create --protocol tcp --port-range-min 22 --port-range-max 22 --direction ingress demo
+
+. SSL Key Pairの作成登録
+
+  # cd ~/.ssh
+  # nova keypair-add OSP_DEMO_KEY > OSP_DEMO_KEY.pem
+  # chmod 600 OSP_DEMO_KEY.pem
+
+. Network関連情報収集
+.. net-id の確認
+
+  # neutron net-list
+
+. cirros イメージからインスタンスを起動
+
+  # nova boot --flavor 1 --image cirros --key_name OSP_DEMO_KEY --security_group demo  --nic net-id=d200a8cd-1606-4f2c-b4d6-31e0030d2c33  cirros-01
+
+.. 参考 インスタンスの停止
+
+  # nova delete cirros-01
+
+. 作成したサーバに Network NameSpace 経由でアクセス
+.. Network NameSpace の確認
+
+  # ip netns
+
+    qrouter-05abf641-8357-48cb-b3d5-e9575f80bd35
+    qdhcp-d200a8cd-1606-4f2c-b4d6-31e0030d2c33
+
+.. Network NameSpaceを指定し bash を実行
+
+  # ip netns exec qrouter-05abf641-8357-48cb-b3d5-e9575f80bd35 bash
+
+.. 該当サーバへ SSH
+
+  #  ssh -l cirros -i OSP_DEMO_KEY.pem 10.0.0.3
+
+
+. Floating IP の払い出し
+
+  [root@rhel-osp01 ~(keystone_admin)]# neutron floatingip-create public
+  Created a new floatingip:
+  +---------------------+--------------------------------------+
+  | Field               | Value                                |
+  +---------------------+--------------------------------------+
+  | fixed_ip_address    |                                      |
+  | floating_ip_address | 192.168.99.91                        |
+  | floating_network_id | 5d0bf62b-8195-4a8b-a662-bb5f6ed0ac69 |
+  | id                  | ce655a44-7e82-44db-b99c-8ed047d8581d |
+  | port_id             |                                      |
+  | router_id           |                                      |
+  | status              | DOWN                                 |
+  | tenant_id           | 49a04215a0f54bad8debac68cd7c32c0     |
+  +---------------------+--------------------------------------+
+
+. ポート確認
+
+  # neutron port-list
+
+. Floting IP とポートのマッピング
+
+  [root@rhel-osp01 ~(keystone_admin)]# neutron floatingip-associate ce655a44-7e82-44db-b99c-8ed047d8581d d8b25751-c548-4935-8041-697c62ab4494
+Associated floating IP ce655a44-7e82-44db-b99c-8ed047d8581d
+
+. Floting IP のマッピング確認
+
+  # neutron floatingip-list
+
+
+  この後、FloatingIPに対して接続を試みるが失敗する
+
+    # ssh -l cirros -i OSP_DEMO_KEY.pem 192.168.99.91
+
+
+
+
+. RHEL7.2 Guest イメージからインスタンスを起動
+
+  # nova boot --flavor 2 --image rhel7.2_guest --key_name OSP_DEMO_KEY --security_group demo  --nic net-id=d200a8cd-1606-4f2c-b4d6-31e0030d2c33  rhel-01

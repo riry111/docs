@@ -1,0 +1,38 @@
+- hosts: ssh-container
+  vars_files:
+  - ../vars/main.yml
+  vars:
+    EAP_VERSION: 6.4.0
+    EAP_PATCH_VERSION: 6.4.3
+    ARCHIVE_DIR: "{{ HOME_DIR }}/archive"
+    JBOSS_HOME: "{{ JBOSS_DIR }}/jboss-eap-6.4"
+    EAP_FILE: jboss-eap-{{ EAP_VERSION }}
+    EAP_PATCH_FILE: jboss-eap-{{ EAP_PATCH_VERSION }}-patch.zip
+  remote_user: root  
+  tasks:
+    - name: Copy EAP Patch Archive File
+      copy: src=./files/{{ ARCHIVE_DIR }}/{{ EAP_PATCH_FILE }} dest={{ ARCHIVE_DIR }} owner={{ OS_USER }} group={{ OS_USER }} mode=0644
+
+    - name: Check JBoss EAP Process
+      shell: ps -ef | grep java | grep -server | grep {{ JBOSS_HOME }} | grep -v grep
+      register: result
+      failed_when: result.rc not in [0, 1]
+
+    - name: Start JBoss EAP
+      shell: nohup {{ JBOSS_HOME }}/bin/standalone.sh -c standalone.xml 2>&1 > /dev/null &
+      sudo: yes
+      sudo_user: "{{ OS_USER }}"
+      when: result.rc == 1
+
+    - name: Check Apply JBoss EAP Patch
+      shell: grep "jboss-eap-{{ EAP_PATCH_VERSION }}.CP" {{ JBOSS_HOME }}/.installation/identity.conf
+      register: result
+      failed_when: result.rc not in [0, 1, 2] 
+
+    - name: Apply JBoss EAP Patch
+      command: '{{ JBOSS_HOME }}/bin/jboss-cli.sh "patch apply {{ ARCHIVE_DIR }}/{{ EAP_PATCH_FILE }}"'
+      when: result.rc != 0
+
+    - name: Delete JBoss EAP Patch Archive
+      file: path={{ ARCHIVE_DIR }}/{{ EAP_PATCH_FILE }} state=absent
+      

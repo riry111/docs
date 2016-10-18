@@ -1,0 +1,485 @@
+= OpenShift 3.2 Install memo
+
+== 参考情報
+* 構成：master x 1, node x 2
+
+master: :: ose3m01.osaka.redhat.com
+node: :: ose3n01.osaka.redhat.com , ose3n02.osaka.redhat.com
+* KVM を利用。DHCPから直接アドレスを取得(ブリッジ接続)：[KVM設定メモ](./kvm_command.md)
+* https://access.redhat.com/documentation/en/openshift-enterprise/version-3.2/installation-and-configuration[OpenShift 3.2 インストールガイド]
+
+== 環境準備
+=== サーバ準備
+* KVMの rhel7_min クローン
+
+----
+# for host in ose3m01 ose3n01 ose3n02
+> do
+> virt-clone --original rhel7_min --name $host --file /var/lib/libvirt/images/$host.qcow2
+> done
+----
+
+* KVMネットワークブリッジ設定
+* ホスト名変更
+
+----
+# nmcli general hostname ose3m01
+----
+
+* コンソールログインの設定 (rhel7_min で設定済み)
+* 固定アドレスの設定 (各サーバで実施)
+
+** [blue]#/etc/sysconfig/network-scripts/ifcfg-ens3#の記述を修正
+
+  TYPE="Ethernet"
+  BOOTPROTO="none"
+  DEFROUTE="yes"
+  IPV4_FAILURE_FATAL="no"
+  NAME="ens3"
+  UUID="eb27c5d9-a128-4423-98ca-26458ec1de0b"
+  DEVICE="ens3"
+  ONBOOT="yes"
+  PEERDNS="no"
+  PEERROUTES="yes"
+  NM_CONTROLLED="no"
+  NETMASK=255.255.255.0
+  IPADDR=192.168.99.81
+  GATEWAY=192.168.99.1
+  DNS1=192.168.99.80
+  DNS2=192.168.99.51
+
+** ネットワークを再起動
+
+  # systemctl stop network
+  # systemctl start network
+
+=== サブスクリプション登録
+
+* サブスクリプション関連の設定 (Master/node 共通)
+
+
+  ** サブスクリプション有効化
+
+  # subscription-manager register --username=<user_name> --password=<password>
+
+  ** Pool Id の紐付け
+
+  # subscription-manager attach --pool=<pool_id>
+  # subscription-manager attach --pool 8a85f98144844aff014488d058bf15be
+
+	** Yumリポジトリのサブスクライブ
+
+  # subscription-manager repos --disable="*"
+  # subscription-manager repos \
+      --enable="rhel-7-server-rpms" \
+      --enable="rhel-7-server-extras-rpms" \
+      --enable="rhel-7-server-ose-3.2-rpms"
+
+=== パッケージ管理
+
+* ベースパッケージの導入
+
+  # yum install wget git net-tools bind-utils iptables-services bridge-utils bash-completion
+
+* Update実行
+
+  # yum update
+
+* OpenShift Quick インストール / Advanced インストール実施の場合、ツールを導入
+
+  # yum install atomic-openshift-utils
+
+
+[red]#[注意]# openshift-ansible-3.0.88-1 にはバグ https://bugzilla.redhat.com/show_bug.cgi?id=1334187[bug:1334187] があり
+OSE3.2 導入時にdocker を downgrade しようとするので https://github.com/openshift/openshift-ansible/pull/1866/commits/65e5a1cff1df156ab0eb9f57ce302ae2ed47bbf1[対策] が必要となります
+
+* [blue]#/usr/share/ansible/openshift-ansible/roles/docker/tasks/main.yml# の修正
+
+  [変更前]  command: "{{ ansible_pkg_mgr }} downgrade -y docker-{{ docker_version }}"
+  [変更後]  command: "{{ ansible_pkg_mgr }} swap -y docker-* docker-*{{ docker_version }}"
+
+=== Docker インストール
+
+OSE3.2 を導入する際は、docker 1.9.1 以上の導入が必要となります。
+
+* docker インストール
+
+  # yum install docker
+
+* [blue]#/etc/sysconfig/docker# の OPTIONS に次の記述を設定
+
+    OPTIONS='--insecure-registry=172.30.0.0/16 --selinux-enabled --log-opt max-size=1M --log-opt max-file=3'
+
+
+* [blue]#/etc/sysconfig/docker-storage# の OPTIONS に次の記述を設定 +
+Dockerでループバックシステムの利用を非推奨。Dockerコマンド実行時の警告メッセージ抑止のため。
+
+    DOCKER_STORAGE_OPTIONS="--storage-opt dm.no_warn_on_loop_devices=true"
+
+* docker の再起動・自動起動設定
+
+  # systemctl enable docker
+  # systemctl start docker
+
+* docker の初期化を実施する [yellow]#(すでにDockerが起動していた場合)#
+
+  # systemctl stop docker
+  # rm -rf /var/lib/docker/*
+  # systemctl restart docker
+
+=== root で パスワード無しログインの設定(SSH)
+
+* SSH キーペアの作成
+
+  # ssh-keygen
+
+* SSH キーの配布
+
+
+  # for host in ose3m01.osaka.redhat.com \
+      ose3n01.osaka.redhat.com \
+      ose3n02.osaka.redhat.com; \
+      do ssh-copy-id -i ~/.ssh/id_rsa.pub $host; \
+      done
+
+== OpenShift 3.2 インストール
+
+=== Quickインストール 設定ファイル準備
+
+インストールを実行するユーザーのホームディレクトリの配下[red]#(~/.config/openshift/)#に
+インストール設定用のファイルを準備しておくと、簡単にインストールすることができます。
+OpenShift Enterprise v3.1.1 からは、[red]#atomic-openshift-master、atomic-openshift-node# を
+コンテナで実行することも可能になりましたが、ここでは従来のrpmでインストールするため、
+[red]#containerized: false# とします。 ose3m01.osaka.redhat.comは、Master
+サーバーとしての機能(atomic-openshift-master)とNodeサーバーとしてインフラ用のコンテナ
+(Docker Registry、HAProxy)を動作させるので、[red]#master: true#、[red]#node: true#とします。
+また、public_hostname は、管理用のWebUIとして公開するホスト名なのでDNSなどで名前解決できるホスト名とします。
+
+
+* [blue]#/root/.config/openshift/installer.cfg.yml# を作成
+
+  version: v1
+  variant: openshift-enterprise
+  variant_version: 3.2
+  ansible_ssh_user: vagrant
+  ansible_log_path: /tmp/ansible.log
+  hosts:
+  - ip: 192.168.99.81
+    hostname: ose3m01.osaka.redhat.com
+    public_ip: 192.168.99.81
+    public_hostname: ose3m01.osaka.redhat.com
+    master: true
+    node: true
+    containerized: false
+    connect_to: 192.168.99.82
+  - ip: 192.168.99.82
+    hostname: ose3n01.osaka.redhat.com
+    public_ip: 192.168.99.82
+    public_hostname: ose3n01.osaka.redhat.com
+    node: true
+    connect_to: 192.168.99.82
+  - ip: 192.168.99.83
+    hostname: ose3n02.osaka.redhat.com
+    public_ip: 192.168.99.83
+    public_hostname: ose3n02.osaka.redhat.com
+    node: true
+    connect_to: 192.168.99.83
+
+=== OpenShift Quickインストール実施
+* atomic-openshift-installer の実行
+
+  # atomic-openshift-installer -u install
+
+* インストールが終わると次のようなメッセージが表示されます
+
+  PLAY RECAP ********************************************************************
+  192.168.99.81              : ok=402  changed=81   unreachable=0    failed=0
+  192.168.99.82              : ok=106  changed=23   unreachable=0    failed=0
+  192.168.99.83              : ok=106  changed=23   unreachable=0    failed=0
+  localhost                  : ok=21   changed=0    unreachable=0    failed=0
+  ・・・
+  The installation was successful!
+
+=== インストール完了後の設定
+==== ノードの確認
+インストールが完了したら、Nodeが起動していることを確認します。
+
+  # oc get node
+  NAME                       STATUS                     AGE
+  ose3m01.osaka.redhat.com   Ready,SchedulingDisabled   14m
+  ose3n01.osaka.redhat.com   Ready                      6m
+  ose3n02.osaka.redhat.com   Ready                      6m
+
+==== ラベルの付与
+Node の役割を示すラベルが付いていない場合は、ラベルを付与します
+
+[gray-background small]#ノード# [small]#ラベル# +
+[gray-background small]#ose3m01# [small]#region=infra,zone=default# +
+[gray-background small]#ose3n01# [small]#region=primary,zone=east# +
+[gray-background small]#ose3n02# [small]#region=primary,zone=west#
+
+* ラベルの設定
+
+  # oc label node ose3m01.osaka.redhat.com region=infra zone=default
+  # oc label node ose3n01.osaka.redhat.com region=primary zone=east
+  # oc label node ose3n02.osaka.redhat.com region=primary zone=west
+
+
+* ラベルの確認
+
+  # oc get node -o json | grep labels -A4
+  "labels": {
+      "kubernetes.io/hostname": "ose3m01.osaka.redhat.com",
+      "region": "infra",
+      "zone": "default"
+  }
+  --
+  "labels": {
+      "kubernetes.io/hostname": "ose3n01.osaka.redhat.com",
+      "region": "primary",
+      "zone": "east"
+  }
+  --
+  "labels": {
+      "kubernetes.io/hostname": "ose3n02.osaka.redhat.com",
+      "region": "primary",
+      "zone": "west"
+  }
+
+==== 管理者画面 アカウント設定
+
+* Basic認証用のパスワードファイル登録
+
+  # touch /etc/origin/openshift-passwd
+
+* ユーザ登録 +
+[gray-background small]#ユーザー名# [small]#user01# +
+[gray-background small]#パスワード# [small]#redhat#
+
+  # htpasswd -b /etc/origin/openshift-passwd user01 redhat
+
+* HTPasswd での認証を有効化
+** [blue]#/etc/origin/master/master-config.yaml# を編集
+
+*** 変更前
+
+
+  identityProviders:
+  - challenge: true
+    login: true
+    mappingMethod: claim
+    name: deny_all
+    provider:
+      apiVersion: v1
+      kind: DenyAllPasswordIdentityProvider
+
+
+*** 変更後
+
+  identityProviders:
+  - challenge: true
+    login: true
+    mappingMethod: claim
+    name: htpasswd_auth
+    provider:
+      apiVersion: v1
+      kind: HTPasswdPasswordIdentityProvider
+      file: /etc/origin/openshift-passwd
+
+
+
+=== Docker RegistryとRouterの作成
+==== スケジューリングの有効化
+OpenShiftのビルダーで作成した Docker Imageを保持するためのDocker Registryとルーティング機能を提供するHAProxyのデプロイします。
+
+[gray small]#実行ユーザー:# [small]#root# +
+[gray small]#実行サーバー:# [small]#Master#
+
+
+  # oadm manage-node ose3m01.osaka.redhat.com --schedulable=true
+
+
+==== Docker Registry
+ここでは、Persistent Volume を使わずにMasterサーバーのディレクトリをマウントする方式をとります。
+Persistent Volume を利用する場合は、[red]#OpenShift v3.2 Installation ad Configurataion
+ の　Charpter2. Installing# を参照してください。 Docker Registryがインフラ用ノードにデプロイされるように、
+ 　[red]#--selector="region=infra"# と指定します。
+
+* Registry 作成
+
+  # mkdir -p /registry
+  # chmod 777 /registry
+  # oadm registry \
+  --service-account=registry \
+  --config=/etc/origin/master/admin.kubeconfig \
+  --credentials=/etc/origin/master/openshift-registry.kubeconfig \
+  --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
+  --mount-host=/registry \
+  --selector="region=infra" \
+  --replicas=1
+
+* Registry 作成確認 +
+Podのステータスが Running になっていることを確認します。
+
+  # oc get pod
+  NAME                      READY     STATUS    RESTARTS   AGE
+  docker-registry-1-fqcac   1/1       Running   0          1m
+
+==== Router
+
+* Router の作成
+
+  # oadm router \
+  --credentials=/etc/origin/master/openshift-router.kubeconfig \
+  --service-account=router \
+  --selector="region=infra" \
+  --config=/etc/origin/master/admin.kubeconfig \
+  --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
+  --replicas=1
+
+* Router 作成確認 +
+Podのステータスが Running になっていることを確認します。
+
+  # oc get pod
+  NAME                      READY     STATUS    RESTARTS   AGE
+  docker-registry-1-fqcac   1/1       Running   0          14m
+  router-1-qes2j            1/1       Running   0          1m
+
+==== アプリケーションドメインのデフォルト値変更
+
+アプリケーションのドメイン名の接尾辞が cloudapps.example.com となるように変更します。
+
+* [blue]#/etc/origin/master/master-config.yaml# を次のように変更します。
+
+** 変更前
+
+  routingConfig:
+    subdomain:  ""
+
+** 変更後
+
+  routingConfig:
+  subdomain:  "cloudapps.example.com"
+
+==== atomic-openshift-master の再起動
+
+* 再起動コマンド実行
+
+  # systemctl restart atomic-openshift-master.service
+
+* OpenShift ステータス確認
+----
+# oc status
+In project default on server https://ose3m01.osaka.redhat.com:8443
+
+svc/docker-registry - 172.30.183.24:5000
+  dc/docker-registry deploys registry.access.redhat.com/openshift3/ose-docker-registry:v3.2.0.20
+    deployment #1 deployed 22 minutes ago - 1 pod
+
+svc/kubernetes - 172.30.0.1 ports 443, 53->8053, 53->8053
+
+svc/router - 172.30.75.188 ports 80, 443, 1936
+  dc/router deploys registry.access.redhat.com/openshift3/ose-haproxy-router:v3.2.0.20
+    deployment #1 deployed 7 minutes ago - 1 pod
+
+View details with 'oc describe <resource>/<name>' or list everything with 'oc get all'.
+----
+[small]#再起動後、上記で設定したアカウントで OpenShiftにログイン可能となります。#
+
+
+== サンプルプロジェクト作成 (CLI)
+
+GitHub上のソースをもとにサンプルアプリを作成します。本手順では、次の3点を実施しています。 +
+
+. Webアプリケーションのビルド +
+. DBのビルド +
+. WebアプリケーションとDBの接続設定
+
+なお、以下で実行するコマンドは、OpenShift のクライアントツールを作業端末にインストールする必要があります。
+
+* Client Tool のインストール
+  ** Linux, Windows, Mac 用のバイナリーを　https://access.redhat.com/downloads/content/290/ver=3.2/rhel---7/3.2.0.20/x86_64/product-software[こちら] から取得し作業端末に展開する
+    *** oc コマンドにPATHを通してください。
+
+
+* ログイン (Client Tool 導入済みのPCから実施可能)
+
+  $ oc login -u mamurai --server=https://ose3m01.osaka.redhat.com:8443
+
+* プロジェクト作成
+
+  $ oc new-project mlbparks
+
+* GitHub上のソースよりWebアプリケーションをビルド
+
+  $ oc new-app jboss-eap64-openshift https://github.com/riry111/openshift3mlbparks.git
+  --> Found image 92667ba (3 weeks old) in image stream "jboss-eap64-openshift" in project "openshift" under tag "latest" for "jboss-eap64-openshift"
+  ・・・
+  --> Creating resources with label app=openshift3mlbparks ...
+      imagestream "openshift3mlbparks" created
+      buildconfig "openshift3mlbparks" created
+      deploymentconfig "openshift3mlbparks" created
+      service "openshift3mlbparks" created
+  --> Success
+      Build scheduled, use 'oc logs -f bc/openshift3mlbparks' to track its progress.
+      Run 'oc status' to view your app.
+
+オリジナルは  https://github.com/gshipley/openshift3mlbparks.git より個人のGitHubアカウントで fork してます。
+
+
+* ビルドの状況確認
+
+	$ oc get builds
+	$ oc build-logs openshift3mlbparks-1
+
+
+* サービスが作成されていることを確認
+
+  $ oc get services
+  NAME                 CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+  openshift3mlbparks   172.30.37.129   <none>        8080/TCP,8443/TCP,8778/TCP   20m
+
+* service を指定し route を作成する
+
+	$ oc expose service openshift3mlbparks
+
+* route を確認 ([red small]#FQDNは <アプリ名>-<プロジェクト名>-subdomain# [3.4.4で指定])
+
+  $ oc get route
+  NAME                 HOST/PORT                                           PATH      SERVICE                       TERMINATION   LABELS
+  openshift3mlbparks   openshift3mlbparks-mlbparks.cloudapps.example.com             openshift3mlbparks:8080-tcp                 app=openshift3mlbparks
+
+
+* DBのビルド
+
+  $ oc new-app mongodb -e MONGODB_USER=mlbparks -e MONGODB_PASSWORD=mlbparks -e MONGODB_DATABASE=mlbparks -e MONGODB_ADMIN_PASSWORD=mlbparks
+
+* Webアプリケーションに接続先DBの設定を追加 (User/Passwd/DB名は固定)
+
+  $ oc env dc openshift3mlbparks -e MONGODB_USER=mlbparks -e MONGODB_PASSWORD=mlbparks -e MONGODB_DATABASE=mlbparks
+
+* 環境変数設定確認
+
+  $ oc get dc openshift3mlbparks -o json | grep env -A12
+                          "env": [
+                              {
+                                  "name": "MONGODB_USER",
+                                  "value": "mlbparks"
+                              },
+                              {
+                                  "name": "MONGODB_PASSWORD",
+                                  "value": "mlbparks"
+                              },
+                              {
+                                  "name": "MONGODB_DATABASE",
+                                  "value": "mlbparks"
+                              }
+
+* ブラウザからの動作確認 +
+
+  URL: http://openshift3mlbparks-mlbparks.cloudapps.example.com/
+
+[blue small]#事前に XXX.cloudapps.example.com へのアクセスを master サーバに連携するためのDNSの設定が必要となります。#
+
+                              
+以　上

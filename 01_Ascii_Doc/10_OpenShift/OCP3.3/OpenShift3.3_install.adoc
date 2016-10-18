@@ -1,0 +1,992 @@
+:scrollbar:
+:data-uri:
+:toc2:
+
+
+== OpenShift Container Platform 3.3 Install
+
+ローカル環境 intel に kvm で3サーバ構築しインストールするまでの手順を示す
+
+
+=== サーバ環境
+[[anchor-1]]
+.サーバ一覧
+[cols="1,2,1,1",options="header"]
+|====
+| IP Address	| Host Name | Virt Name | Memory
+| 192.168.99.93	| master1	master1.osaka.redhat.com | osc33_master1 | 2GB
+| 192.168.99.96	| infranode1	infranode1.osaka.redhat.com | osc33_infranode1 | 2GB
+| 192.168.99.98	| node1		node1.osaka.redhat.com | osc33_node1 | 5GB
+| 192.168.99.99	| node2		node2.osaka.redhat.com | ose33_node2 | 5GB
+|====
+
+[NOTE]
+Users and Groups are already created in the lab's IPA (idm.example.com) host.
+
+:numbered:
+
+== サーバ環境構築
+
+=== master1 サーバーの準備
+==== Kvm Clone
+
+まずは1サーバのみ構築。必要なソフトウエア Docker を設定する
+- kvmのclone
+
+----
+# virt-clone --original rhel7-min --name osc33_master1 \
+	--file /var/lib/libvirt/images/OSC33/osc33_master1.qcow2
+# virsh start osc33_master1
+----
+
+==== ホスト名、IPアドレスの変更
+[[anchor-2]]
+----
+# nmcli general hostname master1.osaka.redhat.com
+# vi /etc/sysconfig/network-scripts/ifcfg-eth0
+
+=== 追加記述 ===
+BOOTPROTO="static"
+IPADDR=192.168.99.93
+NETMASK=255.255.255.0
+NETWORK=192.168.99.0
+GATEWAY=192.168.99.1
+BROADCAST=192.168.99.255
+DNS1=192.168.99.51
+DNS2=8.8.8.8
+=== 追加記述 ===
+
+# systemctl restart network
+----
+
+==== サブスクリプション登録
+
+. register with RHSM
++
+----
+subscription-manager register --force --name osc33_master1
+----
+. pool IDの紐付けを行う
++
+----
+subscription-manager attach --pool=8a85f98152735e7c015276b19b1d2fb8
+----
+. 必要なリポジトリのみサブスクライブする 
++
+----
+# subscription-manager repos --disable="*"
+# subscription-manager repos \
+    --enable="rhel-7-server-rpms" \
+    --enable="rhel-7-server-extras-rpms" \
+    --enable="rhel-7-server-ose-3.3-rpms"
+----
+
+==== ベースパッケージのインストール
+. 次のパッケージをインストールする
++
+----
+# yum install wget git net-tools bind-utils iptables-services bridge-utils bash-completion
+----
+. 最新のパッケージにアップデート
++
+----
+# yum update
+----
+
+
+==== Docker インストール
+
+. install Docker 1.10
++
+----
+# yum install docker-1.10.3
+----
+. **/etc/sysconfig/docker** ファイルの OPTION に `--insecure-registry 172.30.0.0/16` を追加する
++
+----
+# sed -i.orig -e 's/--selinux-enabled --log-driver=journald/--selinux-enabled --log-driver=journald --insecure-registry 172.30.0.0\/16/g' /etc/sysconfig/docker
+----
+. Docker サービス起動設定
++
+----
+# systemctl enable docker
+# systemctl restart docker
+----
+
+==== Docker Strage の設定
+検証用お試し環境のためこの部分は飛ばす。ローカルストレージを利用
+
+
+
+=== node側サーバの準備
+==== Kvm Clone
+
+node 2サーバの構築。上記で作成した master1 を clone する
+
+----
+# for node in osc33_node1 osc33_node2 osc33_infranode1
+do
+virt-clone --original osc33_master1 --name ${node} \
+	--file /var/lib/libvirt/images/OSC33/${node}.qcow2
+virsh start ${node}
+done
+----
+
+==== ホスト名、IPアドレスの変更
+
+----
+# nmcli general hostname master1.osaka.redhat.com
+# vi /etc/sysconfig/network-scripts/ifcfg-eth0
+----
+* 設定値については以下のリンクを参照してください。
+** <<anchor-1,IPアドレス>>
+** <<anchor-2,ifcfg-eth0 の設定例>>
+
+==== サブスクリプション登録
+. register with RHSM
++
+----
+subscription-manager register --force --name osc33_node1
+----
+. pool IDの紐付けを行う
++
+----
+subscription-manager attach --pool=8a85f98152735e7c015276b19b1d2fb8
+----
+
+== 個別設定
+=== NFSサーバの設定
+Persistence Volume で利用するNFS Server を intel.osaka.redhat.com で実施するため、nfs-server を起動します。
+
+==== NFS Server 環境構築 (インベントリーで nfs を設定する場合は不要)
+. NFS Server の起動
++
+----
+# systemctl start nfs-server.service
+# systemctl enable nfs-server.service
+----
+. firewalld の設定変更
++
+----
+# firewall-cmd --add-service=nfs --zone=public --permanent
+# firewall-cmd --reload
+# firewall-cmd --list-service --zone=public
+----
+
+
+=== master1
+
+==== 個別パッケージのインストール
+. OpenShift Container Platform utilites のインストール
++
+----
+# yum install atomic-openshift-utils
+----
+
+==== SSH KeyPair の準備
+
+. ssh key の作成
++
+----
+# ssh-keygen -t rsa
+----
+. ssh client の設定
++
+----
+echo "StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+----
+. ssh public key の配布
++
+----
+# for node in master1 node1 node2
+do
+ssh-copy-id -i ~/.ssh/id_rsa.pub ${node}
+done
+----
+
+==== インベントリーファイルの準備
+/etc/ansible/hosts を準備する。 パラメータは https://github.com/openshift/openshift-ansible/blob/master/inventory/byo/hosts.ose.example[こちら] を参照
+
+[NOTE]
+OpenShift3.3 から metrics のインストール設定も可能となったが、metrics で利用する openshift-infra の NodeSelector が設定できないため、コメントアウトしている。
+
+----
+[OSEv3:children]
+masters
+nodes
+
+# Set variables common for all OSEv3 hosts
+[OSEv3:vars]
+# SSH user, this user should allow ssh based auth without requiring a password
+ansible_ssh_user=root
+
+# If ansible_ssh_user is not root, ansible_sudo must be set to true
+#ansible_sudo=true
+
+deployment_type=openshift-enterprise
+
+# uncomment the following to enable htpasswd authentication; defaults to DenyAllPasswordIdentityProvider
+openshift_master_identity_providers=[{'name': 'htpasswd_auth', 'login': 'true', 'challenge': 'true', 'kind': 'HTPasswdPasswordIdentityProvider', 'filename': '/etc/origin/master/htpasswd'}]
+
+
+# default subdomain to use for exposed routes
+openshift_master_default_subdomain=cloudapps.osaka.redhat.com
+
+# default project node selector
+osm_default_node_selector='region=primary'
+openshift_hosted_router_selector='region=infra'
+openshift_hosted_router_replicas=1
+openshift_hosted_registry_selector='region=infra'
+openshift_hosted_registry_replicas=1
+
+# registry
+openshift_hosted_registry_storage_kind=nfs
+openshift_hosted_registry_storage_access_modes=['ReadWriteMany']
+openshift_hosted_registry_storage_host=intel.osaka.redhat.com
+openshift_hosted_registry_storage_nfs_directory=/srv/nfs
+openshift_hosted_registry_storage_volume_name=registry
+openshift_hosted_registry_storage_volume_size=5Gi
+
+# metrics (Comment Out : can't select NodeSelector)
+openshift_hosted_metrics_deploy=true
+openshift_hosted_metrics_storage_kind=nfs
+openshift_hosted_metrics_storage_access_modes=['ReadWriteOnce']
+openshift_hosted_metrics_storage_host=intel.osaka.redhat.com
+openshift_hosted_metrics_storage_nfs_directory=/srv/nfs
+openshift_hosted_metrics_storage_nfs_options='*(rw,root_squash)'
+openshift_hosted_metrics_storage_volume_name=metrics
+openshift_hosted_metrics_storage_volume_size=10Gi
+openshift_hosted_metrics_public_url=https://metrics.cloudapps.osaka.redhat.com/hawkular/metrics
+
+# Force setting of system hostname when configuring OpenShift
+# This works around issues related to installations that do not have valid dns
+# entries for the interfaces attached to the host.
+openshift_set_hostname=True
+
+# host group for masters
+[masters]
+master1.osaka.redhat.com
+
+# host group for nodes, includes region info
+[nodes]
+master1.osaka.redhat.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}"
+infranode1.osaka.redhat.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}"
+node1.osaka.redhat.com openshift_node_labels="{'region': 'primary', 'zone': 'east'}"
+node2.osaka.redhat.com openshift_node_labels="{'region': 'primary', 'zone': 'west'}"
+----
+
+=== OpenShift インストール前環境の保存
+全サーバを停止しスナップショットを取得。既にインストール実行前の準備は終了している。
+
+. スナップショットの取得
++
+----
+# for node in osc33_master1 osc33_node1 osc33_node2 osc33_infranode1
+do
+virsh snapshot-create-as $node sn_${node}_before-install
+done
+----
+. スナップショットの取得確認
++
+----
+# for node in osc33_master1 osc33_node1 osc33_node2 osc33_infranode1
+do
+virsh snapshot-list $node
+done
+----
+. [参考]スナップショットの切り戻し
++
+----
+# for node in osc33_master1 osc33_node1 osc33_node2 osc33_infranode1
+do
+virsh snapshot-revert $node sn_${node}_before-install
+done
+----
+
+
+== OpenShift のインストール
+=== Advanced Installation の実行
+----
+# ansible-playbook /usr/share/ansible/openshift-ansible/playbooks/byo/config.yml
+----
+
+=== インストール実施後の動作確認
+
+=== Webログイン用の管理者アカウント作成
+
+. ログイン用のBasic認証アカウント作成
++
+----
+# touch /etc/origin/master/htpasswd
+# htpasswd -b /etc/origin/master/htpasswd oscadm r3dh4t1!
+# htpasswd -b /etc/origin/master/htpasswd mamurai 1qaz2wsx
+----
+. oscadm に管理者権限を付与
++
+----
+# oadm policy add-cluster-role-to-user cluster-admin oscadm
+----
+
+==== Ansible で設定する場合の例
+. Ansible Playbook の作成
++
+----
+# vi /root/playbooks/01_create_user.yaml
+----
+.. yaml の記載例
++
+----
+- hosts: masters
+  remote_user: root
+
+  vars:
+    htpasswd : /etc/origin/master/htpasswd
+    admin_user : oscadm
+    admin_passwd : r3dh4t1!
+    common_passwd : redhat1!
+    users: 
+       - { name: 'mamurai', passwd: 'ninija9r' }
+       - { name: "{{ admin_user }}" , passwd: "{{ admin_passwd }}" }
+       - { name: 'andrew', passwd: "{{ common_passwd }}" }
+       - { name: 'karla', passwd : "{{ common_passwd }}" }
+
+  tasks:
+  - name: Create HtPasswd File
+    file: path={{ htpasswd }} state=touch mode="u=rw,g=r,o=r"
+
+  - name: Create User	
+    shell: htpasswd -b {{ htpasswd }} {{ item.name }} {{ item.passwd }}
+    with_items: "{{ users }}"
+
+  - name: Add cluster-admin to {{ admin_user }}
+    shell: "oadm policy add-cluster-role-to-user cluster-admin {{ admin_user }}"
+----
+
+. Ansible Playbook の実行
++
+----
+# ansible-playbook /root/playbooks/01_create_user.yaml 
+----
+.. 実行結果の例
++
+----
+PLAY [masters] *****************************************************************
+
+TASK [setup] *******************************************************************
+ok: [master1.osaka.redhat.com]
+
+TASK [Create HtPasswd File] ****************************************************
+changed: [master1.osaka.redhat.com]
+
+TASK [Create User] *************************************************************
+changed: [master1.osaka.redhat.com] => (item={u'passwd': u'ninija9r', u'name': u'mamurai'})
+changed: [master1.osaka.redhat.com] => (item={u'passwd': u'r3dh4t1!', u'name': u'oscadm'})
+changed: [master1.osaka.redhat.com] => (item={u'passwd': u'redhat1!', u'name': u'andrew'})
+changed: [master1.osaka.redhat.com] => (item={u'passwd': u'redhat1!', u'name': u'karla'})
+
+TASK [Add cluster-admin to oscadm] *********************************************
+changed: [master1.osaka.redhat.com]
+
+PLAY RECAP *********************************************************************
+master1.osaka.redhat.com   : ok=4    changed=3    unreachable=0    failed=0 
+----
+
+=== OpenShift インストール後環境の保存
+
+. スナップショットの取得
++
+----
+# for node in osc33_master1 osc33_node1 osc33_node2 osc33_infranode1
+do
+virsh snapshot-create-as $node sn_${node}_after-install
+done
+----
+. スナップショットの取得確認
++
+----
+# for node in osc33_master1 osc33_node1 osc33_node2 osc33_infranode1
+do
+virsh snapshot-list $node
+done
+----
+インストール実施後の設定
+# oadm manage-node master1.osaka.redhat.com --schedulable=true
+
+== OpenShift 環境整備
+=== Cluster Metrics の有効化 (上記手順では初期インストール時に設定済み)
+==== Node Selector の設定
+Metrics 関連の Pod を infranode に格納するため、openshift-infraプロジェクトの NodeSelectorの設定を変更する。
+
+. **openshift-infra** プロジェクトへ移動
++
+----
+# oc project openshift-infra
+----
+. openshift-infra プロジェクトの NodeSelecter を 'region=infra' に設定
++
+----
+# oc annotate namespace openshift-infra openshift.io/node-selector='region=infra' --overwrite
+----
+. NodeSelector 設定確認
++
+----
+# oc describe project openshift-infra
+----
+`Node Selector:		region=infra` の記述があることを確認する
+
+==== ServiceAcconunt の作成
+. metrics-deployer Service Account を作成し、openshift-infraプロジェクトの **edit** 権限を付与
++
+----
+# oc create serviceaccount metrics-deployer
+# oadm policy add-role-to-user edit system:serviceaccount:openshift-infra:metrics-deployer
+----
+. heapster Service Account への権限付与 +
+heapster サービスアカウントは 有効な 各node の /status endpoint にアクセスするので、**cluster-reader** 権限が必要
++
+----
+# oadm policy add-cluster-role-to-user cluster-reader system:serviceaccount:openshift-infra:heapster
+----
+[NOTE]
+heapster サービスアカウント は Metrics コンポーネントデプロイ時に自動で作成されます。
+
+==== Persistence Volume の作成
+
+. NFS サーバー側の設定例
++
+----
+# mkdir -p /srv/nfs/metrics 
+# chown nfsnobody:nfsnobody /srv/nfs/metrics
+# chmod 777 /srv/nfs/metrics
+# echo '/srv/nfs/metrics *(rw,root_squash)' >> /etc/exports
+# exportfs -r
+# showmount -e
+----
+
+. Persistence Volume の作成
++
+----
+# echo '{
+  "apiVersion": "v1",
+  "kind": "PersistentVolume",
+  "metadata": {
+    "name": "metrics-volume"
+  },
+  "spec": {
+    "capacity": {
+        "storage": "5Gi"
+        },
+    "accessModes": [ "ReadWriteOnce","ReadWriteMany" ],
+    "nfs": {
+        "path": "/srv/nfs/metrics",
+        "server": "intel.osaka.redhat.com"
+    }
+  }
+}' | oc create -f -
+----
+
+==== 証明書の作成
+ROUTER の デフォルト証明書を使うため、metrics-deployer に ダミーの証明書を作成する
+
+. ダミー証明書の作成
++
+----
+# oc secrets new metrics-deployer nothing=/dev/null
+----
+
+==== Metric コンポーネントのデプロイ
+----
+# oc process metrics-deployer-template -n openshift -v HAWKULAR_METRICS_HOSTNAME=metrics.cloudapps.osaka.redhat.com,IMAGE_VERSION=v3.3,IMAGE_PREFIX=registry.access.redhat.com/openshift3/,USE_PERSISTENT_STORAGE=true,CASSANDRA_PV_SIZE=5Gi | oc create -f -
+----
+
+==== Metric コンポーネントの削除
+----
+oc project openshift-infra
+
+oc delete all --selector="metrics-infra"
+oc delete sa --selector="metrics-infra"
+oc delete templates --selector="metrics-infra"
+oc delete secrets --selector="metrics-infra"
+oc delete pvc --selector="metrics-cassandra-1"
+
+oc delete sa metrics-deployer
+oc delete secret metrics-deployer
+oc delete pv metrics-volume 
+----
+
+=== Jenkins CI-CD 設定
+
+.Jenkins CI-CD ユーザー説明
+[cols="1,2",options="header"]
+|====
+| ユーザー名 | 説明
+| andrew | 開発者 dev/test Projectの管理者
+| karla  | 運用者 prod Projectの管理者
+|====
+
+==== Jenkins で操作するサンプルプロジェクトの作成
+
+. Jenkins で Buildするサンプルプロジェクトの作成
++
+----
+# oc login -u andrew
+# oc new-project mlbparks
+# oc create -f https://raw.githubusercontent.com/mamurai/openshift3mlbparks/master/mlbparks-template-eap.json
+# oc new-app mlbparks-eap
+----
+
+==== Jenkins コンテナのインストール
+===== Jenkins Persistence Volume の作成
+
+. NFS サーバー側の設定例
++
+----
+# mkdir -p /srv/nfs/jenkins 
+# chown nfsnobody:nfsnobody /srv/nfs/jenkins
+# chmod 777 /srv/nfs/jenkins
+# echo '/srv/nfs/jenkins *(rw,root_squash)' >> /etc/exports
+# exportfs -a
+# showmount -e
+----
+
+. Persistence Volume の作成
++
+----
+# oc login -u system:admin
+# echo '{
+  "apiVersion": "v1",
+  "kind": "PersistentVolume",
+  "metadata": {
+    "name": "jenkins-volume"
+  },
+  "spec": {
+    "capacity": {
+        "storage": "1Gi"
+        },
+    "accessModes": [ "ReadWriteOnce","ReadWriteMany" ],
+    "nfs": {
+        "path": "/srv/nfs/jenkins",
+        "server": "intel.osaka.redhat.com"
+    }
+  }
+}' | oc create -f -
+----
+
+==== Jenkins プロジェクトへの権限付与
+
+----
+# oc login -u system:admin
+# oc new-project sharedjenkins --description "Jenkins Project"
+# oc policy add-role-to-user edit system:serviceaccount:sharedjenkins:jenkins -n mlbparks
+# oc policy add-role-to-user admin system:serviceaccount:sharedjenkins:jenkins -n sharedjenkins
+----
+
+==== Jenkins コンテナを sharedjenkins プロジェクトにデプロイ
+----
+# oc login -u system:admin
+# oc new-app jenkins-persistent -n sharedjenkins -p JENKINS_PASSWORD=r3dh4t1!
+----
+
+==== [参考] 上記の CI-CD設定を Ansible Playbook での実行する場合の例
+. playbook の作成
++
+----
+# vi /root/playbooks/02_jenkins_sample.yaml
+----
+  * yamlの記載例
++
+----
+- hosts: masters
+  remote_user: root
+
+  vars:
+    template_dir : /root/playbooks/template
+    working_dir : /root
+    proj_owner : andrew
+    app_proj : mlbparks
+    app_template: https://raw.githubusercontent.com/mamurai/openshift3mlbparks/master/mlbparks-template-eap.json
+    common_passwd : redhat1!
+    jenkins_proj : sharedjenkins
+    jenkins_passwd : r3dh4t1!
+    jenkins_pv_name : jenkins-volume
+    jenkins_pv_path : /srv/nfs/jenkins
+    jenkins_pv_host : intel.osaka.redhat.com
+
+  tasks:
+  - name: Login Nomal User	
+    shell: echo {{ common_passwd }}oc login -u {{ proj_owner }}
+
+  - name: Create New Project
+    shell: oc new-project {{ app_proj }}
+
+  - name: Create MLB Parks App Template
+    shell: oc create -f {{ app_template }}
+
+  - name: Create MLB Parks App
+    shell: oc new-app mlbparks-eap
+
+  - name: Login Admin
+    shell: oc login -u system:admin
+
+  - name: Create Jenkins Project
+    shell: oc new-project {{ jenkins_proj }} --description "Jenkins Project"
+
+  - name: Add role to jenkins edit {{ app_proj }}
+    shell: oc policy add-role-to-user edit system:serviceaccount:{{ jenkins_proj }}:jenkins -n  {{ app_proj }}
+
+  - name: Add role to jenkins SA
+    shell: oc policy add-role-to-user admin system:serviceaccount:{{ jenkins_proj }}:jenkins -n {{ jenkins_proj }}
+
+  - name: Create Jenkins PV template
+    template: src="{{ template_dir }}/jenkins/jenkins_pv.j2" dest="{{ working_dir }/jenkins_pv.yaml"
+ 
+  - name: Create Jenkins Persistence Volume
+    shell: cat {{ working_dir }}/jenkins_pv.yaml | oc create -f -
+ 
+  - name: Deploy Jenkins 
+    shell: oc new-app jenkins-persistent -n {{ jenkins_proj }} -p JENKINS_PASSWORD={{ jenkins_passwd }}
+----
+
+. Persistence Volume作成用テンプレートの作成
++
+----
+# mkdir -p /root/playbooks/template/jenkins
+# vi /root/playbooks/template/jenkins/jenkins_pv.j2
+----
+  * template 記載例
++
+----
+{
+  "apiVersion": "v1",
+  "kind": "PersistentVolume",
+  "metadata": {
+    "name": "{{ jenkins_pv_name }}"
+  },
+  "spec": {
+    "capacity": {
+        "storage": "1Gi"
+        },
+    "accessModes": [ "ReadWriteOnce","ReadWriteMany" ],
+    "nfs": {
+        "path": "{{ jenkins_pv_path }}",
+        "server": "{{ jenkins_pv_host }}"
+    }
+  }
+}
+----
+
+. Ansible playbook の実行
++
+----
+# ansible-playbook /root/playbooks/02_jenkins_sample.yaml
+----
+
+== Jenkins Pipeline の作成
+. Web Console、Jenkins のログイン確認、及び、サンプルアプリの表示確認を実施
+  * 下記に示すURLはお使いの環境に合わせて変更してください
++
+
+.URL一覧
+[cols="1,3,1",iptions="header"]
+|====
+| 対象ページ | URL | ID/Pass
+| Web Console | https://master1.osaka.redhat.com:8443/ | oscadm / r3dh4t1!
+| Jenkins     | https://jenkins-sharedjenkins.cloudapps.osaka.redhat.com | admin / r3dh4t1!
+| Sample App  | http://mlbparks-mlbparks.cloudapps.osaka.redhat.com/ | -
+|====
+
+
+=== Jenkins セキュリティ設定変更
+
+GitHub の Webhook と Jenkins Pipeline 連携のためセキュリティレベルを変更する
+
+. jenkins にログイン
+
+. セキュリティレベルを変更する
+  * Manage Jenkins > Configure Global Security をクリック
+  * Configure Global Security ページにて 以下の設定を実施
+    ** Allow users to sign up にチェックを入れる
+    ** Authorization を Logged-in users can do anything に変更
+
+=== Jenkins Pipeline の作成 (mlbparks の ビルド＋デプロイ)
+
+. Jenkins にログインし、ビルドパイプラインを作成
+  * New Item  > Item Name に名称 を設定 > Pipeline を選択 > OK をクリック
+  * [Trigger builds remotely] にチェックを入れ 任意の Authentication Token を設定する
+     [jenkins_mlbparks_build_token] を仮に設定
+  * Pipeline > Definition を Pipeline script を選択し 次のスクリプトを設定する
+    ** ここではビルド->デプロイのみの簡単なパイプラインのみ設定しています。必要に応じてスクリプトの中を書き換え絵ください。
++
+----
+node {
+	stage 'Build-App'
+	openshiftBuild apiURL: '', authToken: '', bldCfg: 'mlbparks', buildName: '', checkForTriggeredDeployments: 'false', commitID: '', namespace: 'mlbparks', showBuildLogs: 'false', verbose: 'false', waitTime: '1800000'
+
+	stage 'Deploy-App'
+	openshiftDeploy apiURL: '', authToken: '', depCfg: 'mlbparks', namespace: 'mlbparks', verbose: 'false', waitTime: '1800000'
+}
+----
+
+. Buld Now をクリックし Pipeline Build を実行
+* 画面表示のサンプル
+
+image::images/OpenShift3.3_Jenkins_Sample_001.png[]
+
+=== GitHub より Webhookの設定を実施する
+
+. サンプルアプリ格納場所に移動
++
+----
+https://github.com/mamurai/openshift3mlbparks
+----
+
+. WebHook の設定
+  * Settings > Webhooks > Add Webhook より Webhook設定画面を開く
+  * Payload URL に Jenkins Pipeline Job と TokenのURLを追記
++
+----
+https://jenkins-sharedjenkins.cloudapps-5120.oslab.opentlc.com/job/mlbparks_build/build?token=jenkins_mlbparks_build_token
+----
+  * Disable SSL verification をクリックする
+  * Add Webhook をクリックすると、Jenkins Pipline 側で ビルドが実行されます
+  * 以降は、対象のソースに Commit が走れば OpenShift側のビルドバイプラインが自動実行されます。
+
+
+
+== バックアップ (Dev - Test - Prod 3環境のパイプライン)
+. プロジェクト作成
++
+----
+# oc login -u system:admin
+# oadm new-project app-dev --display-name="Development"
+# oadm new-project app-test --display-name="Testing"
+# oadm new-project app-prod --display-name="Production"
+----
+
+. andrew , karla ユーザー権限付与
+
+.. andrew に dev/test プロジェクトの admin ロールを付与
++
+----
+# oadm policy add-role-to-user admin andrew -n app-dev
+# oadm policy add-role-to-user admin andrew -n app-test
+----
+
+.. andrewに prod プロジェクトの view ロールを付与
++
+----
+# oc policy add-role-to-user view andrew -n app-prod
+----
+
+.. karla に prod プロジェクトの admin ロールを付与
++
+----
+# oadm policy add-role-to-user admin karla -n app-prod
+----
+
+.. app-dev プロジェクトのイメージを app-prod プロジェクトから pullできるよう権限を付与する
++
+----
+# oc policy add-role-to-group system:image-puller system:serviceaccounts:app-prod -n app-dev
+----
+
+.. portal-test プロジェクトのイメージを portalapp-prod プロジェクトから pullできるよう権限を付与する
++
+----
+# oc policy add-role-to-group system:image-puller system:serviceaccounts:app-test -n app-dev
+----
+
+.. 権限の付与確認
++
+----
+# oc describe policybinding :default -n app-dev
+# oc describe policybinding :default -n app-test
+# oc describe policybinding :default -n app-prod
+----
+
+==== アプリケーションのデプロイ (開発環境)
+
+. 開発者アカウント **andrew** でログイン
++
+----
+# echo 'redhat1!' | oc login -u andrew
+----
+
+. Develop 環境 に　**openshift-tasks**という名称でサンプルアプリ をデプロイ
++
+----
+# oc new-app jboss-eap64-openshift~https://github.com/mamurai/SeatReservation.git --env=JAVA_OPTS="-Xms256m -Xmx256m -Djboss.modules.system.pkgs=org.jboss.logmanager -Djava.util.logging.manager=org.jboss.logmanager.LogManager" --name=openshift-tasks -n app-dev
+----
+	
+. ビルドの確認
++
+----
+# oc logs -f build/openshift-tasks-1 -n app-dev
+----
+
+. dev namespace にデプロイされている imagestream openshift-tasks を確認
++
+----
+# oc describe imagestream openshift-tasks -n app-dev
+---- 
+
+. portalapp:latest イメージに タグ付けする
++
+----
+# oc tag openshift-tasks:latest openshift-tasks:TestingCandidate -n app-dev
+# oc tag openshift-tasks:latest openshift-tasks:ProdReady -n app-dev
+----
+
+. タグを確認する
++
+----
+# oc describe is openshift-tasks -n app-dev
+----
+
+==== アプリケーションのデプロイ (テスト環境)
+
+. 開発者アカウント **andrew** でログイン
++
+----
+# echo 'redhat1!' | oc login -u andrew
+----
+
+. Test 環境 に　**openshift-tasks**という名称でサンプルアプリ をデプロイ
++
+----
+# oc new-app jboss-eap64-openshift~https://github.com/mamurai/SeatReservation.git --env=JAVA_OPTS="-Xms256m -Xmx256m -Djboss.modules.system.pkgs=org.jboss.logmanager -Djava.util.logging.manager=org.jboss.logmanager.LogManager" --name=openshift-tasks -n app-test
+----
+
+==== アプリケーションのデプロイ (本番環境)
+
+. 運用者アカウント **karla** でログイン
++
+----
+# echo 'redhat1!' | oc login -u karla
+----
+
+. Prod 環境 に　**openshift-tasks**という名称でサンプルアプリ をデプロイ
++
+----
+# oc new-app jboss-eap64-openshift~https://github.com/mamurai/SeatReservation.git --env=JAVA_OPTS="-Xms256m -Xmx256m -Djboss.modules.system.pkgs=org.jboss.logmanager -Djava.util.logging.manager=org.jboss.logmanager.LogManager" --name=openshift-tasks -n app-prod
+----
+
+==== Jenkins Persistence Volume の作成
+
+. NFS サーバー側の設定例
++
+----
+# mkdir -p /srv/nfs/jenkins 
+# chown nfsnobody:nfsnobody /srv/nfs/jenkins
+# chmod 777 /srv/nfs/jenkins
+# echo '/srv/nfs/jenkins *(rw,root_squash)' >> /etc/exports
+# exportfs -a
+# showmount -e
+----
+
+. Persistence Volume の作成
++
+----
+# oc login -u system:admin
+# echo '{
+  "apiVersion": "v1",
+  "kind": "PersistentVolume",
+  "metadata": {
+    "name": "jenkins-volume"
+  },
+  "spec": {
+    "capacity": {
+        "storage": "1Gi"
+        },
+    "accessModes": [ "ReadWriteOnce","ReadWriteMany" ],
+    "nfs": {
+        "path": "/srv/nfs/jenkins",
+        "server": "intel.osaka.redhat.com"
+    }
+  }
+}' | oc create -f -
+----
+
+==== Jenkins プロジェクトへの権限付与
+
+3.2の時とは違い **system:serviceaccount:sharedjenkins:jenkins** に edit権限を付与する　以前は、「system:serviceaccount:sharedjenkins:default」
+
+----
+# oc login -u system:admin
+# oc new-project sharedjenkins --description "Jenkins Project"
+# oc policy add-role-to-user edit system:serviceaccount:sharedjenkins:jenkins -n app-dev
+# oc policy add-role-to-user edit system:serviceaccount:sharedjenkins:jenkins -n app-test
+# oc policy add-role-to-user edit system:serviceaccount:sharedjenkins:jenkins -n app-prod
+# oc policy add-role-to-user admin karla -n sharedjenkins
+# oc policy add-role-to-user admin system:serviceaccount:sharedjenkins:jenkins -n sharedjenkins
+----
+
+==== Jenkins コンテナを sharedjenkins プロジェクトにデプロイ
+----
+# echo 'redhat1!' | oc login -u karla
+# oc new-app jenkins-persistent -n sharedjenkins -p JENKINS_PASSWORD=r3dh4t1!
+----
+= memo
+* metrics インストール時に、node-selector が設定できないため、自動で作成すべきではない。マニュアルに沿って手動作成すべき。
+
+==== Jenkins Pipeline
+
+Jenkins にログインし New item > Pipeline > Config > Pipeline で Pipeline script を選択し 以下のスクリプトを記述する
+
+----
+node {
+	stage 'Build-dev'
+	openshiftBuild apiURL: '', authToken: '', bldCfg: 'openshift-tasks', buildName: '', checkForTriggeredDeployments: 'false', commitID: '', namespace: 'app-dev', showBuildLogs: 'false', verbose: 'false', waitTime: ''
+
+	stage 'Deploy-dev'
+	openshiftDeploy apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-dev', verbose: 'false', waitTime: ''
+
+	stage 'Verify Deployment app-dev'
+	openshiftVerifyDeployment apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false', waitTime: ''
+	
+	stage 'Verify Service app-dev'
+	openshiftVerifyService apiURL: '', authToken: '', namespace: 'app-dev', svcName: 'openshift-tasks', verbose: 'false'
+	
+	stage 'Tag Add TestingCandidate'
+	openshiftTag alias: 'false', apiURL: '', authToken: '', destStream: 'openshift-tasks', destTag: 'TestingCandidate', destinationAuthToken: '', destinationNamespace: 'app-dev', namespace: 'app-dev', srcStream: 'openshift-tasks', srcTag: 'latest', verbose: 'false'
+
+	stage 'Deploy-test'
+	openshiftDeploy apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-test', verbose: 'false', waitTime: ''
+	
+	stage 'Verify Deployment app-test'
+	openshiftVerifyDeployment apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-test', replicaCount: '', verifyReplicaCount: 'false', waitTime: ''
+	
+	stage 'Verify Service app-test'
+	openshiftVerifyService apiURL: '', authToken: '', namespace: 'app-test', svcName: 'openshift-tasks'
+	
+	stage 'Tag Add ProdReady'
+	openshiftTag alias: 'false', apiURL: '', authToken: '', destStream: 'openshift-tasks', destTag: 'ProdReady', destinationAuthToken: '', destinationNamespace: 'app-dev', namespace: 'app-dev', srcStream: 'openshift-tasks', srcTag: 'TestingCandidate', verbose: 'false'
+	
+	stage 'Deploy-prod'
+	openshiftDeploy apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-prod', verbose: 'false', waitTime: ''
+	
+	stage 'Schale app-prod'
+	openshiftScale apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false'
+	
+	stage 'Verify Deployment app-prod'
+	openshiftVerifyDeployment apiURL: '', authToken: '', depCfg: 'openshift-tasks', namespace: 'app-prod', replicaCount: '', waitTime: ''
+	
+	stage 'Verify Service app-test'
+	openshiftVerifyService apiURL: '', authToken: '', namespace: 'app-prod', svcName: 'openshift-tasks'
+
+	stage 'End Message'
+	sh 'echo "Checking everything is OK after deployment to production"'
+}
+----
+==== Jenkins Pipeline 設定
+
+https://github.com/openshift/origin/tree/master/examples/jenkins/pipeline
+
+==== Jenkins-Github Webhookの設定
+
+セキュリティ上問題があるが、Jenkins と Webhookの連携方法がわからなかったので、次のURLの通り、セキュリティレベルを下げた https://www.linkedin.com/pulse/how-build-automated-continuous-deployment-pipeline-jenkins-demiris[参照URL]
+
+. Jenkins 側のセキュリティレベルの設定
+. Piplineの設定で、「Trigger builds remotely」を有効にし、Authentication Token に適当な文字列「jenkins_test_build_token」を設定
+. GitHub の webhookの設定よりWebhook設定 　URL: https://jenkins-sharedjenkins.cloudapps-ca1e.oslab.opentlc.com/job/Build_MLB_Parks/build?token=jenkins_test_build_token
+
