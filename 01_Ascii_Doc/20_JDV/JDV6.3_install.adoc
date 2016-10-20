@@ -1,5 +1,9 @@
+:scrollbar:
+:data-uri:
+:toc2:
 
 = JBoss Data Virtualization インストールガイド
+
 
 :numbered:
 

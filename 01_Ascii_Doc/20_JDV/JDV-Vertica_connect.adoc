@@ -1,3 +1,7 @@
+:scrollbar:
+:data-uri:
+:toc2:
+
 = JDV-HP Vertica 環境構築メモ
 
 本資料では、HP のカラム型データベース Vertica と JBoss Data Virtualization の接続テストを実施するため次の4点を示します。
@@ -228,8 +232,117 @@ JDV 未接続の場合は選択はできないが、手入力は可能です。
 
 
 == Vertica のデータとCSVファイルの結合
+=== Vertica物理モデルより必要な項目のみ抽出した論理モデルを作成
+論理モデル**cc_view_sample** を作成後、この論理モデルの中に、Vertica の物理モデルからCSVファイルと結合するための必要なカラムのみ選択したテーブル **cc_view** を作成します。
 
-[SQL Bkup]
+[width="75%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/Vertica_View_Model_001.png[] | vertica_sample プロジェクトを右クリック、New > Teiid Metadata Model を選択し、新しいモデルを作成します。
+| image:images/Vertica_View_Model_002.png[] | Model Name に モデル名を入力 [(例)では cc_view_sample]、Model Type で View Model(論理モデル) を選択し Finish をクリックします。
+| image:images/Vertica_View_Model_003.png[] | 上記で作成した論理モデルにて 右クリック > New Child > Table を選択し、テーブルを作成します。
+| image:images/Vertica_View_Model_004.png[] | テーブル名を入力 [(例)では、CC_view] し、OKをクリックします。
+| image:images/Vertica_View_Model_005.png[] | cc_view テーブルをダブルクリックすると、Transformation Editor が表示されますので、次のSQLを入力後、[Save/Validate SQL] のボタンをクリックします。 + 
+ + 
+[SQL] + 
 select cc_name, cc_state, cc_region from call_center_dimension
+| image:images/Vertica_View_Model_006.png[] | SQLの構文に誤りがなければ、論理モデル名など適切なSQLに変換され、左記の図のようになります。
+|====
+
+=== 結合対象のCSVファイルをインポート
+vertica のサンプルデータと結合するために作成したCSVファイル **stats.csv** をインポートします。 + 
+なお、本手順では、CSVインポート時に作成する、物理モデル名に **states_csv**、 論理モデル名に **states_view_csv** を指定しています。
+
+[width="75%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/Import_CSV_001.png[] | vertica_sample プロジェクトを右クリック、Import を選択します。
+| image:images/Import_CSV_002.png[] | [File Source (Flat) >> Source and View Model] を選択し Next をクリックします。
+| image:images/Import_CSV_003.png[] | [Flat file on local file system] を選択し、Next をクリックします。
+| image:images/Import_CSV_004.png[] | New ボタンをクリックします。
+| image:images/Import_CSV_005.png[] | [Flat File Data Source] を 選択、Name: に データソース名 [(例)では vertica_csv] を入力し Next をクリックします。
+| image:images/Import_CSV_006.png[] | [Browse...] をクリック、引き込むCSVファイルのあるディレクトリを指定後、[Test Connection] を実行。問題なければ Finish をクリックします。 
+| image:images/Import_CSV_007.png[] | 上記で選択したディレクトリのファイル一覧が表示されますので、CSVファイル [(例)では　state.csv] を選択、Name に 物理モデル名 [(例)では、states_csv] を入力後、Next をクリックします。
+| image:images/Import_CSV_008.png[] | カラムのフォーマットタイプ(デリミター/固定長)を選択。ここでは、デフォルトの Character delimited のまま、Next をクリックします。
+| image:images/Import_CSV_009.png[] | ヘッダーとデリミネータの文字列を指定します。ここではデフォルトのまま Next をクリックします。
+| image:images/Import_CSV_010.png[] | Name に 論理モデル名 [(例)では states_view_csv] New view table name にテーブル名 [(例)では join_table] を入力し、Finish をクリックします。
+| image:images/Import_CSV_011.png[] | インポートが正常終了すると、左の図のような、states テーブルが作成されます。
+|====
+
+** CSV ファイルサンプル
++
+----
+state,jstate,sn,capital,jcabital
+Alabama,アラバマ,AL,Montgomery,モントゴメリ
+Alaska,アラスカ,AK,Juneau,ジュノー
+Arizona,アリゾナ,AZ,Phoenix,フェニックス
+Arkansas,アーカンソー,AR,Little Rock,リトルロック
+California,カリフォルニア,CA,Sacramento,サクラメント
+Colorado,コロラド,CO,Denver,デンバー
+Connecticut,コネチカット,CT,Hertford,ハートフォード
+Delaware,デラウェア,DE,Dover,ドーバー
+Florida,フロリダ,FL,Tallahassee,タラハッシー
+Georgia,ジョージア,GA,Atlanta,アトランタ
+Hawaii,ハワイ,HI,Honolulu,ホノルル
+Idaho,アイダホ,ID,Boise,ボイジー
+Illinois,イリノイ,IL,Chicago,シカゴ
+Indiana,インディアナ,IN,Indianapolis,インディアナポリス
+Iowa,アイオワ,IA,Des Moines,デモイン
+Kansas,カンザス,KA,Topeka,トピカ
+Kentucky,ケンタッキー,KY,Frankfort,フランクフォート
+Louisiana,ルイジアナ,LA,Baton Rouge,バトンルージュ
+Maine,メーン,ME,Augusta,オーガスタ
+Maryland,メリーランド,MD,Annapolis,アナポリス
+Massachusetts,マサチューセッツ,MA,Boston,ボストン
+Michigan,ミシガン,MI,Lansing,ランシング
+Minnesota,ミネソタ,MN,St. Paul,セントポール
+Mississippi,ミシシッピ,MS,Jackson,ジャクソン
+Missouri,ミズーリ,MO,Jefferson,ジェファーソン
+Montana,モンタナ,MT,Helena,ヘレナ
+Nebraska,ネブラスカ,NE,Lincoln,リンカーン
+Nevada,ネバダ,NV,Carson City,カーソンシティー
+New Hampshire,ニューハンプシャー,NH,Concord,コンコード
+New Jersey,ニュージャージー,NJ,Trenton,トレントン
+New Mexico,ニューメキシコ,NM,Santa Fe,サンタフェ
+New York,ニューヨーク,NY,Albany,オールバニ
+North Carolina,ノースカロライナ,NC,Releigh,ローリー
+North Dakota,ノースダコタ,ND,Bismarck,ビスマーク
+Ohio,オハイオ,OH,Columbus,コロンバス
+Oklahoma,オクラホマ,OK,Oklahoma City,オクラホマシティー
+Oregon,オレゴン,OR,Salem,セーラム
+Pennsylvania,ペンシルバニア,PA,Harrisburg,ハリスバーグ
+Rhode Island,ロードアイランド,RI,Providence,プロビデンス
+South Carolina,サウスカロライナ,SC,Columbia,コロンビア
+South Dakota,サウスダコタ,SD,Pierre,ピア
+Tennessee,テネシー,TN,Nashville,ナシュビル
+Texas,テキサス,TX,Austin,オースチン
+Utah,ユタ,UT,Salt Lake City,ソルトレークシティー
+Vermont,バーモント,VT,Montpelier,モントピリア
+Virginia,バージニア,VA,Richmond,リッチモンド
+Washington,ワシントン,WA,Olympia,オリンピア
+West Virginia,ウェストバージニア,WV,Charleston,チャールストン
+Wisconsin,ウィスコンシン,WI,Madison,マジソン
+Wyoming,ワイオミング,WY,Cheyenne,シャイアン
+----
+
+
+=== CSVファイルの論理ビューと Vertica 論理ビューの結合
+上記で作成した論理ビューを結合します。 +
+本手順では、CSVファイル引き込み時に作成した論理モデル states_view_csv の中に、 **join_table** という名称で結合したテーブルを作成しています。
+
+[width="75%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/Vertica_CSV_Join_001.png[] | 論理モデル [states_view_csv.xml] を選択し、右クリック > New child > Table を選択し、小テーブルを作成します。
+| image:images/Vertica_CSV_Join_002.png[] | Name　に テーブル名 [(例)では join_table] を入力し OK をクリックします。
+| image:images/Vertica_CSV_Join_003.png[] | join_table をダブルクリックすると、Transformation Editor が起動しますので、次のSQLを入力後、[Save/Validate SQL] のボタンをクリックします。 + 
+ + 
+[SQL] + 
 select a.cc_name, a.cc_state, a.cc_region, b.jstate, b.jcabital from cc_view a, states b where a.cc_state=b.sn
- 
+| image:images/Vertica_CSV_Join_004.png[] | SQLの構文に誤りがなければ、論理モデル名など適切なSQLに変換され、左記の図のようになります。
+| image:images/Vertica_CSV_Join_005.png[] | join_table を選択し、Modeling > Preview Data を選択し、想定通りのデータが取得できることを確認します。
+| image:images/Vertica_CSV_Join_006.png[] | SQL実行結果
+|====
+
+以　上
+
