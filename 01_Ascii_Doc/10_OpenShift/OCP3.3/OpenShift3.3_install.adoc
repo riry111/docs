@@ -730,7 +730,7 @@ node {
 . Buld Now をクリックし Pipeline Build を実行
 * 画面表示のサンプル
 
-image::images/OpenShift3.3_Jenkins_Sample_001.png[]
+image::images/OpenShift3.3_Jenkins_Sample_002.png[]
 
 === GitHub より Webhookの設定を実施する
 

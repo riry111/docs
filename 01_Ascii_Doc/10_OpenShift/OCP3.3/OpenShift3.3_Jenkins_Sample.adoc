@@ -109,9 +109,8 @@ jenkins-1-5phh8   1/1       Running   1          21h
 |====
 
 === Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)
-OpenShift の ビルドパイプラインを利用するためには、Jenkins と 管理対象アプリケーションを同じプロジェクトに作成する必要があります。+
-今回のサンプルでは、**jenkins-pipeline** プロジェクトに双方のオブジェクトを
-
+Jenkinsコンテナ起動、及び、ビルドパイプラインで操作するサンプルアプリのデプロイ、ビルドパイプライン作成のため、Ansible-Playbook **extra/03_Jenkins_pipeline-deploy.yaml** を実行します。 + 
+OpenShift の ビルドパイプラインを利用するためには、Jenkins と 管理対象アプリケーションを同じプロジェクトに作成する必要があります。 今回のサンプルでは、**jenkins-pipeline** プロジェクトに双方のオブジェクトを格納しています。 
 
   * Jenkins コンテナの起動
   * Jenkins パイプライン用のテンプレート作成
@@ -137,9 +136,98 @@ mlbparks-mongodb-1-h4sxr   1/1       Running     0          31m
 jenkins-pipeline プロジェクトを選択 > Pipeline mlbparks-pipeline をクリックすると、パイプライン実行結果が確認できます。
 
 .WebConsole パイプライン実行結果
-image::images/OpenShift3.3_Jenkins_Sample_001.png[]
+image::images/OpenShift3.3_Jenkins_Sample_001.png[width="75%"]
+
+=== Jenkins Build-Pipeline A/B Testing Sample のデプロイ
+
+OpenShift3.3 の 新機能である 1 つの Route に複数のサービスを所属させ着弾させる比率を変更する A/B Testing のサンプルアプリケーションをデプロイするため、Ansible-Playbook **extra/04_AB_Testing-Jenkins.yaml** を実行します。 + 
+なお、本サンプルでも ビルドパイプラインを作成しておりますので、Jenkinsコンテナと同じプロジェクトに作成する必要があります。 サンプルスクリプトでは、jenkins-pipeline プロジェクトが存在しない場合のみ、プロジェクトの作成、及び、Jenkins コンテナのデプロイを実施します。
+
+  * Jenkins コンテナの起動 ( jenkins-pipeline プロジェクトが存在しない場合のみ )
+  * サンプルアプリ (ruby-hello-world を mamurai に Fork、一部改修したもの) のビルド 
+  ** A/B と2つのアプリをデプロイする際、環境変数 COLOR で、画面上の画像を選択できるようにしています。(red, blue, yellowのみ)
+  * Jenkins ビルドパイプライン の ビルド
++
+----
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/extra/04_AB_Testing-Jenkins.yaml
+----
+
+* Ansible-Playbook 実行後、view-a, view-b アプリケーションの作成が完了したのち、Pipeline からのビルドを実行します。
+** Build Pipeline の名称確認
++
+----
+# oc get bc
+NAME                TYPE              FROM         LATEST
+view-a              Source            Git          2
+view-a-pipeline     JenkinsPipeline                1
+view-b              Source            Git          2
+view-b-pipeline     JenkinsPipeline                1
+----
+
+** Jenkins コンテナを確認すると、Jenkins側に Build Config と 同じ名称の Build Pipeline が作成されていることがわかります。
++
+.Jenkins ログイン後のTopページ
+image::images/OpenShift3.3_Jenkins_Sample_003.png[width="75%"]
+
+** Playbook では Build Pipeline の定義のみ実施しているので、コマンドラインにて Pipeline の ビルドを開始します。
++
+----
+# oc start-build view-a-pipeline
+# oc start-build view-b-pipeline
+----
++
+build 実施後、OpenShift管理コンソールに次のイメージのように、ビルドパイプラインが表示されます
++
+.Build Pipeline からのビルド実行中の Overview 画面
+image::images/OpenShift3.3_Jenkins_Sample_004.png[width="75%"]
++
+.Pipeline の一覧ページ
+image::images/OpenShift3.3_Jenkins_Sample_005.png[width="75%"]
+
+* A/B Testing Router 側の設定変更
+
+本例では、本番用のRoute view-prod と テスト用の route view−test 二つを準備しています。初期状態では、本番用はサービス view-a のみに、テスト用は サービス view-b のみに振り分けられます。
+
+.route毎のロードバランス設定
+[cols="1,1,1,4",options="header"]
+|====
+^.^| route ^.^| view-a ^.^| view-b ^.^| URL
+| view-prod | 100 % | 0 % | http://view-prod-jenkins-pipeline.cloudapps-${GUID}.oslab.opentlc.com 
+| view-test | 0 % | 100 % | http://view-test-jenkins-pipeline.cloudapps-${GUID}.oslab.opentlc.com 
+|====
+
+
+* Route の設定を確認するコマンド
++
+----
+# oc get route
+NAME        HOST/PORT                                               PATH      SERVICES                  PORT       TERMINATION
+jenkins     jenkins-jenkins-pipeline.cloudapps.osaka.redhat.com               jenkins                   <all>      edge/Redirect
+view-prod   view-prod-jenkins-pipeline.cloudapps.osaka.redhat.com             view-a(100%),view-b(0%)   8080-tcp   
+view-test   view-test-jenkins-pipeline.cloudapps.osaka.redhat.com             view-a(0%),view-b(100%)   8080-tcp  
+----
+
+* route の設定を変更し、着弾するサービスを変更する場合の例　( view-prod を view-b のみ着弾するように変更)
++
+----
+# oc set route-backends  view-prod  view-a=0 view-b=100 -n jenkins-pipeline 
+----
+** Route の設置を確認すると、Serviceの割合が変更されたことが確認できます。
++
+----
+# oc get route view-prod
+NAME        HOST/PORT                                               PATH      SERVICES                  PORT       TERMINATION
+view-prod   view-prod-jenkins-pipeline.cloudapps.osaka.redhat.com             view-a(0%),view-b(100%)   8080-tcp 
+----
++
+この方法で、アプリ改修、本番で参照していない方のサービスにデプロイ、検証用の route view-test でまず動作確認を実施し、問題がなければ、本番側の route view-prod の参照先サービスを、検証済みのサービスに切り替えることで、ダウンタイム0でのサービス切り替えが実現可能です。
+
 
 == Jenkins ビルドパイプライン関連の設定
+
+本章は、上記、**1.4. Jenkins コンテナとサンプルアプリのデプロイ** を実施した場合の設定になります。 +
+**1.5. Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)** 、**1.6. Jenkins Build-Pipeline A/B Testing Sample のデプロイ** のみを実施された場合は対象外となります。
+
 === Jenkins セキュリティ設定変更
 
 GitHub の Webhook と Jenkins Pipeline 連携のためセキュリティレベルを変更する
