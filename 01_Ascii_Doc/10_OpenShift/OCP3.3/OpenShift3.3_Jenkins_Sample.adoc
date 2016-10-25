@@ -33,7 +33,11 @@ $ sudo su -
 
   * 初期状態では WebConsole へのログインが無効になっているので、HTPASSWD に変更後、Openshift Masterを再起動
   * OpenShift ユーザーを作成
-+  
+
+==== Ansible Playbook の実行
+
+* ユーザー作成の Playbook **01_IdentityProvider.yaml** を実行
++
 ----
 # ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/01_IdentityProvider.yaml
 ----
@@ -52,6 +56,10 @@ $ sudo su -
 
   * master-config.yaml に metricsPublicURL を追記し、openshift-master を再起動
   * metrics-deployer を実行し、metrics関連のコンテナを起動
+
+==== Ansible Playbook の実行
+
+* Metrics 設定の Playbook **02_Metrics_deploy.yaml** を実行
 +
 ----
 # ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/02_Metrics_deploy.yaml
@@ -77,10 +85,14 @@ metrics-deployer-pwwzd       0/1       Completed   0          1h
 Jenkinsコンテナ起動、及び、ビルドパイプラインで操作するサンプルアプリのデプロイを実施ため、Ansible-Playbook **03_Jenkins_deploy.yaml** を実行します。 + 
 
 [NOTE]
-Teck-Preview の OpenShift-Build-Pipeline を利用する場合は、本項目は実行せず、次項の **Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)** を実施してください。 
+Teck-Preview の OpenShift-Build-Pipeline を利用する場合は、本項目は実行せず、次項の **Jenkinsコンテナとサンプルアプリのデプロイ (Build-Pipeline)** を実施してください。 また、A/B Testing のサンプル環境を構築する場合は、次々項の**Jenkins Build-Pipeline A/B Testing Sample のデプロイ**を実施してください。
 
   * サンプルアプリ (mlbparks を mamurai に Forkしたもの) のビルド
   * Jenkins コンテナの起動
+
+==== Ansible Playbook の実行
+
+* Jenkins 設定の Playbook **03_Jenkins_deploy.yaml** を実行
 +
 ----
 # ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/03_Jenkins_deploy.yaml
@@ -95,7 +107,7 @@ jenkins-1-5phh8   1/1       Running   1          21h
 ----
 
 
-
+==== コンテナの動作確認
 * Web Console、Jenkins のログイン確認、及び、サンプルアプリの表示確認を実施します
   ** 下記に示すURLの **${GUID}** の部分はお使いの環境に合わせて変更してください
 +
@@ -116,6 +128,10 @@ OpenShift の ビルドパイプラインを利用するためには、Jenkins �
   * Jenkins パイプライン用のテンプレート作成
   * サンプルアプリ (mlbparks を mamurai に Forkしたもの) のビルド
   * Jenkins ビルドパイプライン の ビルド
+
+==== Ansible Playbook の実行
+
+* OpenShift ビルドパイプライン設定の Playbook **extra/03_Jenkins_pipeline-deploy.yaml** を実行
 +
 ----
 # ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/extra/03_Jenkins_pipeline-deploy.yaml
@@ -132,8 +148,7 @@ mlbparks-2-thook           1/1       Running     0          23m
 mlbparks-mongodb-1-h4sxr   1/1       Running     0          31m
 ----
 +
-なお、全ての処理が完了したのちに、WebConsoleにアクセス、+
-jenkins-pipeline プロジェクトを選択 > Pipeline mlbparks-pipeline をクリックすると、パイプライン実行結果が確認できます。
+なお、全ての処理が完了したのちに、WebConsoleにアクセスし、jenkins-pipeline プロジェクトを選択 > Pipeline mlbparks-pipeline をクリックすると、パイプライン実行結果が確認できます。
 
 .WebConsole パイプライン実行結果
 image::images/OpenShift3.3_Jenkins_Sample_001.png[width="75%"]
@@ -147,11 +162,23 @@ OpenShift3.3 の 新機能である 1 つの Route に複数のサービスを�
   * サンプルアプリ (ruby-hello-world を mamurai に Fork、一部改修したもの) のビルド 
   ** A/B と2つのアプリをデプロイする際、環境変数 COLOR で、画面上の画像を選択できるようにしています。(red, blue, yellowのみ)
   * Jenkins ビルドパイプライン の ビルド
+
+==== Ansible Playbook の実行
+
+* A/B Testing Sample の Playbook **extra/04_AB_Testing-Jenkins.yaml** を実行
 +
 ----
 # ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/extra/04_AB_Testing-Jenkins.yaml
 ----
 
+==== Jenkins Pipeline の確認
+** Jenkins コンテナを確認すると、Jenkins側に Build Config と 同じ名称の Build Pipeline が作成されていることがわかります。なお、OpenShift側からPipeline の Build Config を修正・削除した場合は、自動的にJenkins側の設定も更新されます。
++
+.Jenkins ログイン後のTopページ
+image::images/OpenShift3.3_Jenkins_Sample_003.png[width="75%"]
+
+
+==== Pipeline Build の実行
 * Ansible-Playbook 実行後、view-a, view-b アプリケーションの作成が完了したのち、Pipeline からのビルドを実行します。
 ** Build Pipeline の名称確認
 +
@@ -164,10 +191,6 @@ view-b              Source            Git          2
 view-b-pipeline     JenkinsPipeline                1
 ----
 
-** Jenkins コンテナを確認すると、Jenkins側に Build Config と 同じ名称の Build Pipeline が作成されていることがわかります。
-+
-.Jenkins ログイン後のTopページ
-image::images/OpenShift3.3_Jenkins_Sample_003.png[width="75%"]
 
 ** Playbook では Build Pipeline の定義のみ実施しているので、コマンドラインにて Pipeline の ビルドを開始します。
 +
@@ -184,11 +207,12 @@ image::images/OpenShift3.3_Jenkins_Sample_004.png[width="75%"]
 .Pipeline の一覧ページ
 image::images/OpenShift3.3_Jenkins_Sample_005.png[width="75%"]
 
-* A/B Testing Router 側の設定変更
+==== A/B Testing Router 側の設定変更
 
 本例では、本番用のRoute view-prod と テスト用の route view−test 二つを準備しています。初期状態では、本番用はサービス view-a のみに、テスト用は サービス view-b のみに振り分けられます。
 
-.route毎のロードバランス設定
+* 初期状態 route毎のロードバランス設定
++
 [cols="1,1,1,4",options="header"]
 |====
 ^.^| route ^.^| view-a ^.^| view-b ^.^| URL
@@ -197,7 +221,7 @@ image::images/OpenShift3.3_Jenkins_Sample_005.png[width="75%"]
 |====
 
 
-* Route の設定を確認するコマンド
+* コマンドラインから route の設定を確認
 +
 ----
 # oc get route
@@ -207,7 +231,7 @@ view-prod   view-prod-jenkins-pipeline.cloudapps.osaka.redhat.com             vi
 view-test   view-test-jenkins-pipeline.cloudapps.osaka.redhat.com             view-a(0%),view-b(100%)   8080-tcp  
 ----
 
-* route の設定を変更し、着弾するサービスを変更する場合の例　( view-prod を view-b のみ着弾するように変更)
+* route view-prod の設定を変更し、着弾するサービスをview-b のみに変更する場合の例
 +
 ----
 # oc set route-backends  view-prod  view-a=0 view-b=100 -n jenkins-pipeline 
@@ -221,6 +245,28 @@ view-prod   view-prod-jenkins-pipeline.cloudapps.osaka.redhat.com             vi
 ----
 +
 この方法で、アプリ改修、本番で参照していない方のサービスにデプロイ、検証用の route view-test でまず動作確認を実施し、問題がなければ、本番側の route view-prod の参照先サービスを、検証済みのサービスに切り替えることで、ダウンタイム0でのサービス切り替えが実現可能です。
+
+==== GitHub との連携設定 (webhook設定)
+GitHub上でソースがコミットされた際に自動的にビルドパイプラインが起動する、webhook の設定方法を紹介します。
+
+[width="90%",cols="3,2",options="header"]
+|====
+^.^| 画面 ^.^| 説明
+| image:images/OpenShift3.3_Jenkins_Sample_006.png[] | OpenShift WebConsole の Pipeline 画面から GitHub webhook URL を取得します。 +
+ + 
+ なお、WebhookのURLは次の通りです。 + 
+ https://**{WebConsoleURL}**/oapi/v1/namespaces/**{プロジェクト名}**/buildconfigs/**{パイプライン名}**/**{secret}**/github
+ 
+| image:images/OpenShift3.3_Jenkins_Sample_007.png[] | ソースを格納する GitHub のリポジトリにて +
+Settings > webhooks > Add webhook ボタンをクリック
+| image:images/OpenShift3.3_Jenkins_Sample_008.png[] | 1) 取得したGitHub webhook URL を 入力 + 
+2) Disabale SSL verification をクリック + 
+3) Add Webhook をクリック
+| image:images/OpenShift3.3_Jenkins_Sample_009.png[] | Disable SSL verification をクリックした際に警告がでます。
+| image:images/OpenShift3.3_Jenkins_Sample_010.png[] | SSL verification is not enabled  の状態になります
+| image:images/OpenShift3.3_Jenkins_Sample_011.png[] | webhook の設定が完了すると左図のようになります。この状態で,GitHub上のソースを一部変更しコミットすると自動でOpenShiftのビルドパイプラインが実行されることを確認できます。
+|====
+
 
 
 == Jenkins ビルドパイプライン関連の設定
@@ -261,9 +307,9 @@ node {
 
 . Buld Now をクリックし Pipeline Build を実行
 * 画面表示のサンプル
-
++
 .Jenkins Pipeline サンプル
-image::images/OpenShift3.3_Jenkins_Sample_002.png[]
+image::images/OpenShift3.3_Jenkins_Sample_002.png[width=60%]
 
 === GitHub より Webhookの設定を実施する
 
