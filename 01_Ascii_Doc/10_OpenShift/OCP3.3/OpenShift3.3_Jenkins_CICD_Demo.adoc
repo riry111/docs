@@ -114,7 +114,7 @@ Jenkinsコンテナ起動、及び、CICDビルドパイプラインで操作す
 * Jenkins 設定の Playbook **05_CICD_OpenShift-pipeline.yaml** を実行
 +
 ----
-# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/05_CICD_OpenShift-pipeline.yaml
+# ansible-playbook /root/Provisioning_OpenShift3.3_FastAdv/playbooks/extra/05_CICD_OpenShift-pipeline.yaml
 ----
 
 ==== コンテナの動作確認
