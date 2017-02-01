@@ -73,13 +73,13 @@ master1 への直接の ssh接続はできないため、oselab サーバを経�
 . アーカイブをoselab へ scp
 +
 ----
-$ scp jboss-eap-7.0.0-installer.jar mamurai-redhat.com@oselab-{$GUID}.oslab.opentlc.com:./
-$ scp jboss-brms-6.4.0.GA-deployable-eap7.x.zip  mamurai-redhat.com@oselab-{$GUID}.oslab.opentlc.com:./
+$ scp jboss-eap-7.0.0-installer.jar mamurai-redhat.com@oselab-${GUID}.oslab.opentlc.com:./
+$ scp jboss-brms-6.4.0.GA-deployable-eap7.x.zip  mamurai-redhat.com@oselab-${GUID}.oslab.opentlc.com:./
 ----
 . oselab から master1 へ アーカイブをscp
 +
 ----
-$ ssh -l mamurai-redhat.com oselab-{$GUID}.oslab.opentlc.com
+$ ssh -l mamurai-redhat.com oselab-${GUID}.oslab.opentlc.com
 $ sudo su -
 # scp /home/mamurai-redhat.com/jboss-brms-6.4.0.GA-deployable-eap7.x.zip master1.example.com:./rhcs-coolstore-demo-master/installs
 # scp /home/mamurai-redhat.com/jboss-eap-7.0.0-installer.jar master1.example.com:./rhcs-coolstore-demo-master/installs
@@ -112,9 +112,9 @@ image:images/OpenShift3.3_BRMS_Coolstore_Demo_001.png[width="70%"]
 [cols="1,3,1",options="header"]
 |====
 ^.^| 種別 ^.^| URL ^.^| ID/Passwd
-^.| Business Central | http://rhcs-coolstore-demo-rhcs-coolstore-demo.cloudapps-{$GUID}.oslab.opentlc.com/business-central | u:erics / p:jbossbrms1!
+^.| Business Central | http://rhcs-coolstore-demo-rhcs-coolstore-demo.cloudapps-${GUID}.oslab.opentlc.com/business-central | u:erics / p:jbossbrms1!
 ^.| CoolStore Demo +
-(Web アプリ) | http://rhcs-coolstore-demo-rhcs-coolstore-demo.cloudapps-{$GUID}.oslab.opentlc.com/brms-coolstore-demo/ ^.^| -
+(Web アプリ) | http://rhcs-coolstore-demo-rhcs-coolstore-demo.cloudapps-${GUID}.oslab.opentlc.com/brms-coolstore-demo/ ^.^| -
 |====
 
 . Business Central にアクセス
