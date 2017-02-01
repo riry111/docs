@@ -70,35 +70,78 @@ master1 への直接の ssh接続はできないため、oselab サーバを経�
 | JBoss BRMS 6.4 |jboss-brms-6.4.0.GA-deployable-eap7.x.zip .2+^.^| master1:/rhcs-coolstore-demo-master/installs
 | JBoss EAP 7 | jboss-eap-7.0.0-installer.jar
 |====
-. アーカイブをoselab へ scp
+. アーカイブをローカルのPCから oselab へ scp
 +
 ----
 $ scp jboss-eap-7.0.0-installer.jar mamurai-redhat.com@oselab-${GUID}.oslab.opentlc.com:./
 $ scp jboss-brms-6.4.0.GA-deployable-eap7.x.zip  mamurai-redhat.com@oselab-${GUID}.oslab.opentlc.com:./
 ----
-. oselab から master1 へ アーカイブをscp
+. oselab から master1.example.com へ アーカイブをscp
+.. oselab サーバに ssh接続
 +
 ----
 $ ssh -l mamurai-redhat.com oselab-${GUID}.oslab.opentlc.com
+----
+.. root にスイッチ
++
+----
 $ sudo su -
+----
+.. master1.example.com へアーカイブを転送
++
+----
 # scp /home/mamurai-redhat.com/jboss-brms-6.4.0.GA-deployable-eap7.x.zip master1.example.com:./rhcs-coolstore-demo-master/installs
 # scp /home/mamurai-redhat.com/jboss-eap-7.0.0-installer.jar master1.example.com:./rhcs-coolstore-demo-master/installs
 ----
 
 === CoolStore Demo のインストール
-. インストール　コマンド実行　(master1)
+. CoolStore Demo インストール　コマンド実行　(master1)
+.. master1.example.com へ ssh接続
 +
 ----
 # ssh master1.example.com
+----
+.. rhcs-coolstore-demo-master　へ移動
++
+----
 # cd  /root/rhcs-coolstore-demo-master
+----
+.. インストーラー init.sh を masterサーバのアドレス 192.168.0.101 を引数として実行
++
+----
 # ./init.sh 192.168.0.101
 ----
 . OpenShift route オブジェクトの再作成 (master1 サーバで OpenShiftアプリ作成完了後に実施) +
 デフォルトでは アプリのURLが rhcs-coolstore-demo.192.168.0.101.xip.io で作成されるのでアクセスできない。
+.. 既存の route rhcs-coolstore-demo を削除
 +
 ----
 # oc delete route rhcs-coolstore-demo
+----
+.. service rhcs-coolstore-demo から route を自動生成
++
+----
 # oc expose service rhcs-coolstore-demo
+----
+.. 作成した route の確認
++
+----
+# oc describe route rhcs-coolstore-demo
+Name:			rhcs-coolstore-demo
+Namespace:		rhcs-coolstore-demo
+Created:		24 minutes ago
+Labels:			app=rhcs-coolstore-demo
+Annotations:		openshift.io/host.generated=true
+Requested Host:		rhcs-coolstore-demo-rhcs-coolstore-demo.cloudapps-d3e2.oslab.opentlc.com
+			  exposed on router router 24 minutes ago
+Path:			<none>
+TLS Termination:	<none>
+Insecure Policy:	<none>
+Endpoint Port:		8080-tcp
+
+Service:	rhcs-coolstore-demo
+Weight:		100 (100%)
+Endpoints:	10.1.3.2:9999, 10.1.3.2:8080, 10.1.3.2:9990 
 ----
 
 === CoolStore Demo の実行
