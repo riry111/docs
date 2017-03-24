@@ -49,20 +49,20 @@
 ### 仮想マシンのコンソールを有効にする
 1. RHEL6 までの場合
 
-	1) /etc/grub.conf にカーネルオプションを追加設定
+1) /etc/grub.conf にカーネルオプションを追加設定
 
 	~~~
 kernel /vmlinuz-2.6.18-238.el6 の最後に 次の記述を追加する
 console=tty0 console=ttyS0,115200n8
 ~~~
 
-	2) /etc/inittab にコンソールモードの設定を追加する
+2) /etc/inittab にコンソールモードの設定を追加する
 	
 	~~~
 S0:12345:respawn:/sbin/agetty ttyS0 115200
 ~~~
 
-	3) 仮想マシン reboot 後、コンソール接続を実施
+3) 仮想マシン reboot 後、コンソール接続を実施
 
 	~~~
 # virsh console <ドメイン名>
@@ -70,7 +70,7 @@ S0:12345:respawn:/sbin/agetty ttyS0 115200
 
 2. RHEL7 の場合
 
-	1) /etc/default/grub ファイルに次の記述を追加
+1) /etc/default/grub ファイルに次の記述を追加
 
 	~~~
 GRUB_CMDLINE_LINUX_DEFAULT="console=tty0 console=ttyS0,115200n8"
@@ -78,13 +78,13 @@ GRUB_TERMINAL=serial
 GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
 ~~~
 
-	2) GRUBの変更を有効にするため次のコマンドを実行
+2) GRUBの変更を有効にするため次のコマンドを実行
 	
 	~~~
 # grub2-mkconfig -o /boot/grub2/grub.cfg
 ~~~
 
-	3) 仮想マシン reboot 後、コンソール接続を実施
+3) 仮想マシン reboot 後、コンソール接続を実施
 
 	~~~
 # virsh console <ドメイン名>
@@ -189,10 +189,12 @@ BRIDGE=br0
 	[参考] 変更前の interface設定
 	
 	~~~
-<interface type='network'>		<mac address='52:54:00:25:5e:f5'/>
+<interface type='network'>
+		<mac address='52:54:00:25:5e:f5'/>
 		<source network='default'/>
 		<model type='rtl8139'/>
-		<address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/></interface>
+		<address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+</interface>
 ~~~
 
 4. 仮想マシンを再起動
@@ -208,7 +210,8 @@ BRIDGE=br0
 2. /etc/libvirt/qemu 以下の他のKVM設定ファイルをコピーし次の4点を変更
 
 	~~~
-<name>rhel6.5-cicd</name><uuid>cb2c541d-f086-4e83-8d38-eccef40c2566</uuid>
+<name>rhel6.5-cicd</name>
+<uuid>cb2c541d-f086-4e83-8d38-eccef40c2566</uuid>
 <source file='/var/lib/libvirt/images/rhel6.5-cicd.qcow2'/>
 <mac address='52:54:00:11:77:04'/>
 ~~~
@@ -217,7 +220,8 @@ BRIDGE=br0
 3. 作成した設定ファイルより KVMを起動
 
 	~~~
-[root@intelnuc images]# virsh create /etc/libvirt/qemu/rhel6.5-cicd.xml ドメイン rhel6.5-cicd が /etc/libvirt/qemu/rhel6.5-cicd.xml から作成されました
+[root@intelnuc images]# virsh create /etc/libvirt/qemu/rhel6.5-cicd.xml 
+ドメイン rhel6.5-cicd が /etc/libvirt/qemu/rhel6.5-cicd.xml から作成されました
 ~~~
 
 ### KVMに仮想IFを追加する
@@ -342,7 +346,10 @@ Last login: Tue Nov 10 18:49:23 2015 from 192.168.122.1
 
 	~~~
 # virsh edit ドメイン名
-<cpu mode='custom' match='exact'>		<model fallback='allow'>Broadwell-noTSX</model>		<feature policy='require' name='vmx'/></cpu>
+<cpu mode='custom' match='exact'>
+		<model fallback='allow'>Broadwell-noTSX</model>
+		<feature policy='require' name='vmx'/>
+</cpu>
 ~~~
 
 
@@ -397,7 +404,22 @@ reboot
 * virsh install で KVMインストール実行
 
 ~~~
-virt-install \  --name rhev-mgr01 \  --hvm \  --virt-type kvm \  --ram 2048 \  --vcpus 1 \  --arch x86_64 \  --os-type linux \  --os-variant rhel6 \  --boot hd \  --disk /var/lib/libvirt/images/rhev-mgr01.qcow2 \  --network bridge=br0 \  --graphics none \  --location /opt/iso/rhel-server-6.7-x86_64-dvd.iso \  --initrd-inject /root/Scripts/rhel6/rhev-mgr01_ks.cfg \  --extra-args='ks=file:/rhev-mgr01_ks.cfg console=tty0 console=ttyS0,115200n8 keymap=ja'
+virt-install \
+  --name rhev-mgr01 \
+  --hvm \
+  --virt-type kvm \
+  --ram 2048 \
+  --vcpus 1 \
+  --arch x86_64 \
+  --os-type linux \
+  --os-variant rhel6 \
+  --boot hd \
+  --disk /var/lib/libvirt/images/rhev-mgr01.qcow2 \
+  --network bridge=br0 \
+  --graphics none \
+  --location /opt/iso/rhel-server-6.7-x86_64-dvd.iso \
+  --initrd-inject /root/Scripts/rhel6/rhev-mgr01_ks.cfg \
+  --extra-args='ks=file:/rhev-mgr01_ks.cfg console=tty0 console=ttyS0,115200n8 keymap=ja'
 ~~~
 
 ## RHEL7.1 kickstart インストール
